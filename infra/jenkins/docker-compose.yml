@@ -1,0 +1,24 @@
+name: devops-jenkins
+
+services:
+  jenkins:
+    # 固定 LTS 与 JDK 版本，升级时必须先备份 Jenkins Home 并完成恢复演练。
+    image: ${JENKINS_IMAGE:?请在 .env 中设置 JENKINS_IMAGE}
+    container_name: devops-jenkins
+    restart: unless-stopped
+    ports:
+      - "${JENKINS_BIND_ADDRESS:?请在 .env 中设置 JENKINS_BIND_ADDRESS}:${JENKINS_HTTP_PORT:?请在 .env 中设置 JENKINS_HTTP_PORT}:8080"
+    volumes:
+      # Job、插件、凭据引用与构建记录必须持久化；不挂载 Docker Socket 到 Jenkins 控制器。
+      - jenkins-home:/var/jenkins_home
+    environment:
+      # 保持首次解锁流程，初始管理员密码只记录到受保护的本机凭据文件。
+      JAVA_OPTS: "-Djenkins.install.runSetupWizard=true"
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+volumes:
+  jenkins-home:
+    name: ${JENKINS_HOME_VOLUME:?请在 .env 中设置 JENKINS_HOME_VOLUME}

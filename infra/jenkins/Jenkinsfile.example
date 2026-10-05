@@ -1,0 +1,121 @@
+pipeline {
+    // 控制器不执行构建，避免 Maven、Docker 和集群工具扩大控制器权限。
+    agent {
+        label 'devops-build'
+    }
+
+    options {
+        // 测试环境只保留有限记录，避免 Jenkins Home 无界增长。
+        buildDiscarder(logRotator(numToKeepStr: '30'))
+        timestamps()
+        disableConcurrentBuilds()
+    }
+
+    parameters {
+        choice(name: 'DEPLOY_ENV', choices: ['dev', 'test'], description: '目标部署环境')
+        string(name: 'IMAGE_TAG', defaultValue: '', description: '为空时使用 Git Commit ID')
+    }
+
+    environment {
+        // Agent 容器通过 Docker Desktop 主机入口访问本机 Nexus，不能使用宿主机 127.0.0.1。
+        REGISTRY_HOST = 'host.docker.internal:18082'
+        IMAGE_REPOSITORY = 'host.docker.internal:18082/test/devops-platform-server'
+        MAVEN_PUBLIC_URL = 'http://host.docker.internal:18081/repository/maven-public/'
+        MAVEN_RELEASES_URL = 'http://host.docker.internal:18081/repository/maven-releases/'
+        MAVEN_SNAPSHOTS_URL = 'http://host.docker.internal:18081/repository/maven-snapshots/'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Validate Parameters') {
+            steps {
+                script {
+                    def requestedTag = params.IMAGE_TAG?.trim()
+                    if (requestedTag && !(requestedTag ==~ /[A-Za-z0-9][A-Za-z0-9._-]{0,127}/)) {
+                        error('IMAGE_TAG 仅允许字母、数字、点、下划线和连字符。')
+                    }
+                    env.RESOLVED_IMAGE_TAG = requestedTag ?: env.GIT_COMMIT.take(12)
+                }
+            }
+        }
+
+        stage('Maven Test') {
+            steps {
+                dir('backend') {
+                    sh 'mvn -s ../infra/jenkins/settings.xml.example -B clean verify'
+                }
+            }
+        }
+
+        stage('Publish Maven Artifact') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'nexus-maven-publish',
+                    usernameVariable: 'NEXUS_MAVEN_USERNAME',
+                    passwordVariable: 'NEXUS_MAVEN_PASSWORD'
+                )]) {
+                    dir('backend') {
+                        sh '''#!/bin/sh
+                            set -eu
+                            mvn -s ../infra/jenkins/settings.xml.example -B -DskipTests deploy \\
+                              -DaltReleaseDeploymentRepository=nexus-releases::${MAVEN_RELEASES_URL} \\
+                              -DaltSnapshotDeploymentRepository=nexus-snapshots::${MAVEN_SNAPSHOTS_URL}
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Build and Push Image') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'nexus-docker-push',
+                    usernameVariable: 'NEXUS_DOCKER_USERNAME',
+                    passwordVariable: 'NEXUS_DOCKER_PASSWORD'
+                )]) {
+                    sh '''#!/bin/sh
+                        set -eu
+                        set +x
+                        printf '%s' "$NEXUS_DOCKER_PASSWORD" | docker login "$REGISTRY_HOST" -u "$NEXUS_DOCKER_USERNAME" --password-stdin
+                        docker build -t "$IMAGE_REPOSITORY:$RESOLVED_IMAGE_TAG" backend
+                        docker push "$IMAGE_REPOSITORY:$RESOLVED_IMAGE_TAG"
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy to K3s') {
+            steps {
+                withCredentials([file(credentialsId: 'k3s-kubeconfig', variable: 'K3S_KUBECONFIG')]) {
+                    withEnv(["KUBECONFIG=${K3S_KUBECONFIG}", 'HELM_DRIVER=configmap']) {
+                        sh '''#!/bin/sh
+                            set -eu
+                            case "$DEPLOY_ENV" in
+                              dev|test) ;;
+                              *) echo "不支持的部署环境：$DEPLOY_ENV" >&2; exit 2 ;;
+                            esac
+                            helm upgrade --install devops-platform infra/helm/devops-platform \\
+                              --namespace "$DEPLOY_ENV" \\
+                              --set image.repository="$IMAGE_REPOSITORY" \\
+                              --set-string image.tag="$RESOLVED_IMAGE_TAG" \\
+                              --wait --timeout 5m
+                            kubectl rollout status deployment/devops-platform-devops-platform \\
+                              --namespace "$DEPLOY_ENV" --timeout=180s
+                        '''
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: 'backend/target/*.jar', allowEmptyArchive: true
+        }
+    }
+}

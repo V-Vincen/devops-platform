@@ -1,0 +1,24 @@
+# 仅用于首次验证 K3s 能通过 Nexus docker-group 拉取 Docker Hub 镜像。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: nexus-pull-check
+  namespace: dev
+  labels:
+    app.kubernetes.io/name: nexus-pull-check
+    app.kubernetes.io/part-of: devops-platform
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nexus-pull-check
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: nexus-docker-group
+      containers:
+        - name: pull-check
+          image: host.docker.internal:18084/library/hello-world:latest
+          imagePullPolicy: Always

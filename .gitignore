@@ -1,0 +1,46 @@
+# Java / Maven
+backend/target/
+backend/.idea/
+*.class
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+LOCAL_CREDENTIALS.txt
+**/application-local.yml
+**/secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa
+id_rsa.*
+*.tfvars
+!*.example.tfvars
+*.secret
+*.secrets
+*.token
+
+# Local API debugging data and generated Python cache
+.fastRequest/
+**/__pycache__/
+*.py[cod]
+
+# IDE and OS
+.idea/
+.vscode/
+.DS_Store
+*.iml
+
+# Local data volumes
+infra/local/data/
+infra/nexus/data/
+infra/k8s/**/data/

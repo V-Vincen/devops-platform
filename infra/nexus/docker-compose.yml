@@ -1,0 +1,43 @@
+name: devops-nexus
+
+services:
+  nexus:
+    image: ${NEXUS_IMAGE:?请在 .env 中设置 NEXUS_IMAGE}
+    container_name: devops-nexus
+    restart: unless-stopped
+    environment:
+      # 外部 PostgreSQL 配置优先于容器中的默认 H2，避免两套元数据并存。
+      NEXUS_DATASTORE_NEXUS_JDBCURL: ${NEXUS_DATASTORE_NEXUS_JDBCURL:?请在 .env 中设置 NEXUS_DATASTORE_NEXUS_JDBCURL}
+      NEXUS_DATASTORE_NEXUS_USERNAME: ${NEXUS_DB_USER:?请在 .env 中设置 NEXUS_DB_USER}
+      NEXUS_DATASTORE_NEXUS_PASSWORD: ${NEXUS_DB_PASSWORD:?请在 .env 中设置 NEXUS_DB_PASSWORD}
+      # Nexus 默认连接池为 100，会耗尽本项目 PostgreSQL 的连接上限；本期仅保留 10 个连接。
+      NEXUS_DATASTORE_NEXUS_ADVANCED: maximumPoolSize=${NEXUS_DB_MAX_POOL_SIZE:?请在 .env 中设置 NEXUS_DB_MAX_POOL_SIZE}
+      # Nexus 使用外部 PostgreSQL 时，JVM 参数必须显式开启数据存储功能。
+      INSTALL4J_ADD_VM_PARAMS: >-
+        -Xms${NEXUS_JVM_HEAP:?请在 .env 中设置 NEXUS_JVM_HEAP}
+        -Xmx${NEXUS_JVM_HEAP:?请在 .env 中设置 NEXUS_JVM_HEAP}
+        -XX:MaxDirectMemorySize=${NEXUS_JVM_DIRECT_MEMORY:?请在 .env 中设置 NEXUS_JVM_DIRECT_MEMORY}
+        -Djava.util.prefs.userRoot=/nexus-data/javaprefs
+        -Dnexus.datastore.enabled=true
+    ports:
+      - "${NEXUS_BIND_ADDRESS:?请在 .env 中设置 NEXUS_BIND_ADDRESS}:18081:8081"
+      - "${NEXUS_BIND_ADDRESS:?请在 .env 中设置 NEXUS_BIND_ADDRESS}:18082:8082"
+      - "${NEXUS_BIND_ADDRESS:?请在 .env 中设置 NEXUS_BIND_ADDRESS}:18083:8083"
+      - "${NEXUS_BIND_ADDRESS:?请在 .env 中设置 NEXUS_BIND_ADDRESS}:18084:8084"
+    volumes:
+      - nexus-data:/nexus-data
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent --show-error http://127.0.0.1:8081/service/rest/v1/status >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 180s
+
+volumes:
+  # 使用具名卷保存 Blob Store、初始管理员密码和本地运行配置。
+  nexus-data:
+    name: devops-nexus-data

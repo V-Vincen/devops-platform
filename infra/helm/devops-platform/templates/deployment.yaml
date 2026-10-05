@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "devops-platform.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "devops-platform.name" . }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "devops-platform.name" . }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "devops-platform.name" . }}
+    spec:
+      imagePullSecrets:
+        {{- toYaml .Values.imagePullSecrets | nindent 8 }}
+      containers:
+        - name: devops-platform
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: SERVER_PORT
+              value: {{ .Values.env.serverPort | quote }}
+            - name: DB_URL
+              value: {{ .Values.env.dbUrl | quote }}
+            - name: DB_USERNAME
+              value: {{ .Values.env.dbUsername | quote }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretRef }}
+                  key: db-password
+            - name: REDIS_HOST
+              value: {{ .Values.env.redisHost | quote }}
+            - name: REDIS_PORT
+              value: {{ .Values.env.redisPort | quote }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretRef }}
+                  key: redis-password
+            - name: NACOS_SERVER_ADDR
+              value: {{ .Values.env.nacosServerAddr | quote }}
+            - name: NACOS_DISCOVERY_ENABLED
+              value: "true"
+            - name: NACOS_CONFIG_ENABLED
+              value: "true"
+            - name: NACOS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretRef }}
+                  key: nacos-username
+            - name: NACOS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secretRef }}
+                  key: nacos-password
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 20

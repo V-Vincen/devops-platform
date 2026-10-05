@@ -1,0 +1,23 @@
+replicaCount: 1
+
+image:
+  repository: docker.example.local/test/devops-platform-server
+  tag: 0.1.0
+  pullPolicy: IfNotPresent
+
+imagePullSecrets:
+  - name: nexus-pull
+
+service:
+  type: ClusterIP
+  port: 8080
+
+env:
+  serverPort: "8080"
+  dbUrl: jdbc:postgresql://postgres.platform-infra.svc.cluster.local:5432/devops_platform
+  dbUsername: devops_user
+  redisHost: redis.platform-infra.svc.cluster.local
+  redisPort: "6379"
+  nacosServerAddr: nacos.platform-infra.svc.cluster.local:8848
+
+secretRef: devops-platform-secret

@@ -1,0 +1,864 @@
+:root {
+  color: #172033;
+  background: #f5f7fa;
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.app-sidebar {
+  background: #101827;
+  color: #e5edf8;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 84px;
+  padding: 0 24px;
+}
+
+.brand-mark {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #61a8ff, #7769f2);
+  color: #fff;
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.brand-title {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.brand-subtitle {
+  margin-top: 2px;
+  color: #7f8da7;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.app-menu {
+  border-right: 0;
+  background: transparent;
+}
+
+.app-menu .el-menu-item {
+  margin: 4px 12px;
+  border-radius: 10px;
+  color: #95a4bd;
+}
+
+.app-menu .el-menu-item.is-active {
+  background: #263651;
+  color: #fff;
+}
+
+.app-menu .el-menu-item:hover {
+  background: #1c2a40;
+  color: #fff;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 84px;
+  padding: 0 34px;
+  border-bottom: 1px solid #e7ebf2;
+  background: #fff;
+}
+
+.header-user {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: #526078;
+  font-size: 13px;
+}
+
+.header-title {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.header-caption {
+  margin-top: 5px;
+  color: #8a94a6;
+  font-size: 13px;
+}
+
+.app-main {
+  padding: 34px;
+  background: #f5f7fa;
+}
+
+.page-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: #7182a2;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+
+h1,
+h2 {
+  margin: 0;
+  color: #172033;
+}
+
+h1 {
+  font-size: 28px;
+}
+
+h2 {
+  font-size: 20px;
+}
+
+.page-description {
+  margin: 10px 0 0;
+  color: #77839a;
+  font-size: 14px;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.stat-card,
+.content-card,
+.welcome-card {
+  border: 1px solid #e8ecf3;
+  border-radius: 14px;
+}
+
+.stat-label {
+  color: #78849a;
+  font-size: 13px;
+}
+
+.stat-value {
+  margin: 16px 0 8px;
+  color: #172033;
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.stat-note {
+  color: #9aa4b5;
+  font-size: 12px;
+}
+
+.welcome-card {
+  margin-top: 20px;
+}
+
+.welcome-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 12px 4px;
+}
+
+.welcome-content p:not(.eyebrow) {
+  margin: 12px 0 0;
+  color: #77839a;
+  font-size: 14px;
+}
+
+.toolbar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.search-input {
+  width: 320px;
+}
+
+.status-select {
+  width: 140px;
+}
+
+.pagination-row {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 20px;
+}
+
+.page-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 18px;
+}
+
+.form-control {
+  width: 100%;
+}
+
+.login-page {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background: radial-gradient(circle at 20% 20%, #e9f2ff, transparent 38%), #f5f7fa;
+}
+
+.login-card {
+  width: min(420px, 100%);
+  padding: 14px;
+  border: 1px solid #e8ecf3;
+  border-radius: 18px;
+}
+
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 48px;
+}
+
+.login-form {
+  margin-top: 28px;
+}
+
+.login-button {
+  width: 100%;
+}
+
+.login-hint {
+  margin: 22px 0 0;
+  color: #9aa4b5;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* 第二阶段资源管理界面的紧凑布局与小屏幕适配。 */
+.app-shell > .el-container,
+.page-section {
+  min-width: 0;
+}
+
+.app-sidebar {
+  background: #111a2b;
+}
+
+.brand {
+  height: 68px;
+  padding: 0 18px;
+}
+
+.brand-mark {
+  width: 34px;
+  height: 34px;
+  font-size: 18px;
+}
+
+.brand-title {
+  font-size: 16px;
+}
+
+.brand-subtitle {
+  font-size: 10px;
+}
+
+.app-menu,
+.app-menu .el-menu {
+  border-right: 0;
+  background: transparent;
+}
+
+.app-menu .el-menu-item,
+.app-menu .el-sub-menu__title {
+  height: 46px;
+  margin: 3px 10px;
+  border-radius: 9px;
+  color: #9eacc4;
+  line-height: 46px;
+}
+
+.app-menu .el-sub-menu .el-menu-item {
+  min-width: 0;
+  height: 40px;
+  margin: 2px 10px 2px 22px;
+  padding-left: 34px !important;
+  font-size: 13px;
+  line-height: 40px;
+}
+
+.app-menu .el-menu-item.is-active,
+.app-menu .el-sub-menu.is-opened > .el-sub-menu__title {
+  background: #283a58;
+  color: #fff;
+}
+
+.app-menu .el-menu-item:hover,
+.app-menu .el-sub-menu__title:hover {
+  background: #1d2c44;
+  color: #fff;
+}
+
+.app-header {
+  height: 58px;
+  padding: 0 24px;
+}
+
+.header-context,
+.header-user {
+  display: flex;
+  align-items: center;
+}
+
+.header-context {
+  gap: 10px;
+  min-width: 0;
+}
+
+.header-user {
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.header-title {
+  font-size: 15px;
+  white-space: nowrap;
+}
+
+.header-divider {
+  width: 1px;
+  height: 16px;
+  background: #dce2eb;
+}
+
+.header-caption {
+  margin-top: 0;
+  color: #8a95a8;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.app-main {
+  min-width: 0;
+  padding: 12px 14px 18px;
+}
+
+.page-heading {
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.eyebrow {
+  margin-bottom: 5px;
+  font-size: 10px;
+}
+
+h1 {
+  font-size: 22px;
+  letter-spacing: -0.02em;
+}
+
+.page-description {
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+.stat-grid {
+  gap: 14px;
+}
+
+.context-card {
+  margin-bottom: 14px;
+  border: 1px solid #e8ecf3;
+  border-radius: 12px;
+}
+
+.context-card .el-card__body {
+  padding: 14px 18px;
+}
+
+.context-selector {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.context-label,
+.context-description {
+  display: block;
+}
+
+.context-label {
+  color: #35425a;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.context-description {
+  margin-top: 3px;
+  color: #8b96a8;
+  font-size: 12px;
+}
+
+.context-selector > .el-select {
+  width: min(360px, 48%);
+}
+
+.content-card .el-card__body {
+  min-width: 0;
+  padding: 18px 20px;
+}
+
+/* 项目、环境和微服务共用紧凑工作台布局，筛选与数据操作分区避免视觉混杂。 */
+.compact-page-heading {
+  min-height: 0;
+  margin-bottom: 8px;
+}
+
+.compact-page-heading .eyebrow {
+  margin: 0 0 3px;
+}
+
+.page-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 28px;
+}
+
+.page-title-row h1 {
+  margin: 0;
+  color: #1f2d44;
+  font-size: 20px;
+  line-height: 1.3;
+}
+
+.page-title-divider {
+  width: 1px;
+  height: 20px;
+  flex: 0 0 1px;
+  background: #dbe2ec;
+}
+
+.page-title-row .page-description {
+  margin: 0;
+  color: #7e8ca3;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.filter-card,
+.table-card {
+  overflow: hidden;
+  margin-bottom: 10px;
+  border: 1px solid #e7edf5;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: none;
+}
+
+.filter-card .el-card__body {
+  padding: 10px 12px;
+}
+
+.table-card .el-card__body {
+  min-width: 0;
+  padding: 10px 12px 12px;
+}
+
+.filter-layout,
+.filter-fields,
+.filter-actions,
+.table-toolbar,
+.table-toolbar-actions {
+  display: flex;
+  align-items: center;
+}
+
+.filter-layout {
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.filter-fields {
+  min-width: 0;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+}
+
+.filter-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #4c5c73;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.filter-field > span {
+  font-weight: 600;
+}
+
+.filter-field .el-input,
+.filter-field .el-select {
+  width: 218px;
+}
+
+.filter-field.filter-project-field .el-select {
+  width: 260px;
+}
+
+.filter-actions {
+  flex: 0 0 auto;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.table-toolbar {
+  min-height: 28px;
+  margin-bottom: 4px;
+}
+
+.table-toolbar-actions {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+/* Element Plus 默认会为相邻按钮追加左外边距，覆盖后由容器 gap 统一控制间距。 */
+.table-toolbar-actions > .el-button + .el-button,
+.filter-actions > .el-button + .el-button {
+  margin-left: 0;
+}
+
+/* 统一操作按钮的颜色语义：新增蓝、修改绿、删除红，行内操作同样保留图标与文字。 */
+.action-button,
+.table-action-button {
+  --el-button-font-weight: 500;
+}
+
+.action-button {
+  min-width: 72px;
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 12px;
+  border-width: 1px;
+}
+
+.action-button.action-create,
+.action-button.action-search {
+  border-color: #9bc9ff;
+  background: #ecf5ff;
+  color: #337ecc;
+}
+
+.action-button.action-search {
+  border-color: #409eff;
+  background: #409eff;
+  color: #fff;
+}
+
+.action-button.action-search:hover,
+.action-button.action-search:focus {
+  border-color: #337ecc;
+  background: #337ecc;
+  color: #fff;
+}
+
+.action-button.action-edit,
+.table-action-button.action-edit,
+.table-action-button.action-enable {
+  border-color: #b7ebc7;
+  background: #effbf3;
+  color: #3ca96a;
+}
+
+.action-button.action-delete,
+.table-action-button.action-delete {
+  border-color: #ffc4c4;
+  background: #fff1f1;
+  color: #e25b5b;
+}
+
+.action-button.action-reset {
+  border-color: #d9e1eb;
+  background: #fff;
+  color: #64748b;
+}
+
+.action-button.action-bind,
+.table-action-button.action-bind {
+  border-color: #ffdca0;
+  background: #fff9ed;
+  color: #d99a20;
+}
+
+.table-action-button.action-detail {
+  border-color: #b7d8ff;
+  background: #eff7ff;
+  color: #3185df;
+}
+
+.table-action-button.action-primary {
+  border-color: #b7d8ff;
+  background: #eff7ff;
+  color: #3185df;
+}
+
+.table-action-button.action-warning {
+  border-color: #ffd995;
+  background: #fff8e9;
+  color: #d99820;
+}
+
+.table-action-button {
+  min-width: auto;
+  margin: 2px 3px 2px 0;
+  min-height: 26px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+
+/* 操作列两端与普通状态单元格的内容左边距保持一致。 */
+.table-card .operation-column .cell {
+  box-sizing: border-box;
+  display: flex;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  align-items: center;
+  width: 100%;
+  /* 工具栏和行内操作均使用 10px 间距，避免组件默认相邻外边距叠加。 */
+  column-gap: 10px !important;
+  /* 覆盖组件默认单侧内边距，确保首尾都以所属单元格边线为 12px。 */
+  padding-inline: 12px !important;
+}
+
+/* 间距由操作单元格统一控制，消除最后一个按钮自身外边距带来的视觉误差。 */
+.table-card .operation-column .table-action-button {
+  flex: 0 0 auto;
+  margin: 2px 0 !important;
+}
+
+.table-card .operation-column .cell > .el-button + .el-button {
+  margin-left: 0 !important;
+}
+
+.table-card .el-table {
+  --el-table-border-color: #e8edf4;
+  --el-table-header-bg-color: #f8fafc;
+  --el-table-row-hover-bg-color: #f7fbff;
+}
+
+.table-card .el-table th.el-table__cell {
+  color: #526178;
+  font-weight: 650;
+}
+
+.project-group-cell {
+  min-width: 140px;
+}
+
+.project-group-name {
+  color: #2f4059;
+  font-weight: 650;
+}
+
+.project-group-code {
+  margin-top: 3px;
+  color: #8190a7;
+  font-size: 12px;
+}
+
+.toolbar {
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.search-input {
+  width: min(420px, 100%);
+}
+
+.status-select {
+  width: 148px;
+}
+
+/* 自动填充左侧空白，使查询按钮始终贴齐筛选栏右侧。 */
+.toolbar > .el-button:last-child {
+  margin-left: auto;
+}
+
+.pagination-row {
+  margin-top: 16px;
+}
+
+.form-grid {
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.permission-card .el-card__body {
+  padding: 18px 20px 20px;
+}
+
+.permission-selector {
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #edf0f5;
+}
+
+.option-role {
+  float: right;
+  color: #8d98aa;
+  font-size: 12px;
+}
+
+.permission-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid #ffe1d8;
+  border-radius: 8px;
+  background: #fff8f5;
+  color: #6d5760;
+  font-size: 13px;
+}
+
+.grant-form {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.grant-form .el-select {
+  width: min(400px, 100%);
+}
+
+.user-list-card {
+  margin-top: 14px;
+}
+
+.card-title {
+  color: #35425a;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.el-dialog {
+  max-width: calc(100vw - 32px);
+}
+
+@media (max-width: 960px) {
+  .app-sidebar {
+    width: 188px !important;
+  }
+
+  .app-main {
+    padding: 18px;
+  }
+
+  .stat-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 720px) {
+  .app-header {
+    height: 54px;
+    padding: 0 14px;
+  }
+
+  .app-sidebar {
+    width: 168px !important;
+  }
+
+  .brand {
+    padding: 0 14px;
+  }
+
+  .brand-subtitle,
+  .header-divider,
+  .header-caption,
+  .header-user > .el-tag {
+    display: none;
+  }
+
+  .header-user {
+    gap: 8px;
+  }
+
+  .app-main {
+    padding: 14px;
+  }
+
+  .page-heading,
+  .context-selector,
+  .welcome-content {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .page-heading > .el-button,
+  .page-actions,
+  .page-actions .el-button,
+  .context-selector > .el-select,
+  .grant-form .el-select {
+    width: 100%;
+  }
+
+  .toolbar,
+  .grant-form {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .search-input,
+  .status-select,
+  .toolbar > .el-button:last-child {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .stat-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .content-card .el-card__body,
+  .permission-card .el-card__body {
+    padding: 14px;
+  }
+}
