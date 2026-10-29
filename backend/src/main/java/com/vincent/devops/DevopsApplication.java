@@ -16,6 +16,8 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
         "com.vincent.devops.project.mapper",
         "com.vincent.devops.environment.mapper",
         "com.vincent.devops.microservice.mapper",
+        "com.vincent.devops.releaseconfig.mapper",
+        "com.vincent.devops.releaseexecution.mapper",
         "com.vincent.devops.auth.mapper"
 })
 public class DevopsApplication {

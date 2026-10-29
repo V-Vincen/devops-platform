@@ -6,6 +6,8 @@ services:
     container_name: devops-nexus
     restart: unless-stopped
     environment:
+      # 密钥文件位于持久化数据卷，确保重建容器和恢复备份时仍可解密原有配置。
+      NEXUS_SECRETS_KEY_FILE: /nexus-data/etc/devops-nexus-secrets.json
       # 外部 PostgreSQL 配置优先于容器中的默认 H2，避免两套元数据并存。
       NEXUS_DATASTORE_NEXUS_JDBCURL: ${NEXUS_DATASTORE_NEXUS_JDBCURL:?请在 .env 中设置 NEXUS_DATASTORE_NEXUS_JDBCURL}
       NEXUS_DATASTORE_NEXUS_USERNAME: ${NEXUS_DB_USER:?请在 .env 中设置 NEXUS_DB_USER}

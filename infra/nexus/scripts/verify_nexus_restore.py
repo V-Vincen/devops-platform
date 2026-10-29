@@ -17,6 +17,7 @@ import re
 import socket
 import subprocess
 import sys
+import tarfile
 import time
 import urllib.error
 import urllib.request
@@ -35,6 +36,13 @@ DEFAULT_BACKUP_ROOT = Path.home() / ".codex" / "backups"
 POSTGRES_CONTAINER = "devops-postgres"
 IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 RESTORE_PORTS = (28081, 28082, 28083, 28084)
+SECRETS_PATH = "etc/devops-nexus-secrets.json"
+
+
+def backup_has_secrets(archive_path: Path) -> bool:
+    """旧备份可能没有自定义密钥；仅在备份包含密钥时启用它。"""
+    with tarfile.open(archive_path, "r") as archive:
+        return any(member.name.removeprefix("./") == SECRETS_PATH and member.isfile() for member in archive)
 
 
 def load_env(path: Path) -> dict[str, str]:
@@ -262,6 +270,7 @@ def verify_restore(arguments: argparse.Namespace) -> int:
     """执行不可覆盖原环境的完整恢复演练，并生成无敏感信息的结果记录。"""
     manifest_path = require_backup_root(arguments.manifest)
     manifest, files = load_manifest(manifest_path)
+    secrets_env = ["-e", f"NEXUS_SECRETS_KEY_FILE=/nexus-data/{SECRETS_PATH}"] if backup_has_secrets(files["volume_archive"]) else []
     source = manifest.get("source")
     if not isinstance(source, dict):
         raise RuntimeError("备份清单缺少源实例信息")
@@ -383,6 +392,7 @@ def verify_restore(arguments: argparse.Namespace) -> int:
                 f"NEXUS_DATASTORE_NEXUS_PASSWORD={required(nexus_env, 'NEXUS_DB_PASSWORD')}",
                 "-e",
                 f"NEXUS_DATASTORE_NEXUS_ADVANCED=maximumPoolSize={required(nexus_env, 'NEXUS_DB_MAX_POOL_SIZE')}",
+                *secrets_env,
                 "-e",
                 f"INSTALL4J_ADD_VM_PARAMS={jvm_parameters}",
                 image,

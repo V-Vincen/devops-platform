@@ -1,8 +1,8 @@
 # DevOps 平台实施路线与执行清单
 
-> 文档版本：F1.7  
-> 更新日期：2026-10-05  
-> 当前状态：第二、三、四阶段已完成本期验收；第五阶段 Jenkins 控制器、首次管理员与建议插件已完成，待接入最小权限凭据和流水线  
+> 文档版本：F1.21
+> 更新日期：2026-10-28
+> 当前状态：第二、三、四阶段已完成本期验收；第五阶段已完成内部执行记录和外部适配层代码，待真实凭据、Jenkins 任务联调和浏览器验收
 > 适用目录：`/Users/vincent/Projects/AiCode/devops/devops-platform`
 
 ## 1. 文档目的
@@ -13,6 +13,20 @@
 
 本项目当前不追求生产级高可用，暂不建设多集群、灰度发布和完整可观测性平台。
 
+### 1.1 快速入口
+
+本文件只记录阶段目标、执行顺序、状态和验收口径；完整文档索引与稳定项目事实见 [项目记忆](../PROJECT_MEMORY.md)。
+
+| 目的 | 文档 |
+|---|---|
+| 总体设计与范围 | [项目设计文档](PROJECT_DESIGN.md) |
+| 当前端口、监听范围与核验状态 | [端口总表](PORT_INVENTORY.md) |
+| 本地 PostgreSQL、Redis 和平台启动 | [本地基础依赖说明](../infra/local/README.md) |
+| Nexus 部署、清理、备份与恢复 | [Nexus 部署说明](../infra/nexus/README.md)、[Nexus 运维说明](../infra/nexus/OPERATIONS.md) |
+| K3s 测试集群 | [K3s 操作说明](../infra/k3s/README.md) |
+| Jenkins 接入 | [Jenkins 操作说明](../infra/jenkins/README.md) |
+| 后续 Nacos、Redis 基础设施 | [Nacos 部署说明](../infra/k8s/nacos/README.md)、[Redis 部署说明](../infra/k8s/redis/README.md) |
+
 ## 2. 当前决策
 
 | 事项 | 当前决定 |
@@ -22,7 +36,7 @@
 | 数据库 | PostgreSQL，使用 Flyway 管理数据库迁移 |
 | 本地依赖 | Docker Desktop 启动 PostgreSQL 和 Redis |
 | 制品仓库 | Nexus Repository，承载 Maven 私服和 Docker 私有镜像仓库 |
-| 代码仓库 | Gitee |
+| 代码仓库 | GitHub、Gitee；当前平台仓库为 GitHub `V-Vincen/devops-platform` |
 | 持续集成 | Jenkins |
 | 容器编排 | K3s/Kubernetes 和 Helm |
 | Nacos | 当前不作为平台启动依赖，部署微服务时再启用 |
@@ -38,14 +52,30 @@
 | 第二阶段 | 项目、环境、微服务管理 | 已完成 | “项目 → 环境 → 微服务”主链路、登录权限和页面交互均已验收确认 |
 | 第三阶段 | Nexus 私服和镜像仓库 | 已完成 | Maven 和 Docker 制品可以上传、下载并在重启后保留 |
 | 第四阶段 | K3s 测试集群 | 已完成 | 单节点集群、Namespace、Nexus 拉取、HTTP Ingress 已验收；平台工作负载待镜像和集群基础 Service 就绪 |
-| 第五阶段 | Jenkins 自动构建部署 | 进行中 | Jenkins 控制器、首次管理员与建议插件已验收；Gitee 提交完整流水线待凭据、构建 Agent 和外部回调接入 |
+| 第五阶段 | 多仓库自动构建部署 | 进行中 | Jenkins 基础设施、构建 Agent 和凭据已准备；待完成双仓库模型、平台编排、实际流水线与外部回调验证 |
 | 第六阶段 | Nacos 配置和服务发现 | 待开始 | 业务微服务可以注册、发现和读取配置 |
 | 第七阶段 | Redis 业务能力 | 待开始 | 缓存、锁、幂等等场景按需接入 |
 | 第八阶段 | 权限、审计、监控和回滚 | 待开始 | 平台具备基本运维和安全能力 |
 
+### 3.1 关键对象与架构职责
+
+| 对象 | 是什么 | 为什么这样选择 | 实施与使用方式 |
+|---|---|---|---|
+| `devops-test` | 运行在 Docker Desktop 中的单节点 K3s 测试集群 | 本期只需验证部署链路，单节点成本低、可在本机重建，不承担生产高可用 | 使用 k3d 创建；承载 `dev`、`test` 等 Namespace 的工作负载。 |
+| `devops-build` | Jenkins 的专用入站构建 Agent | 将 Docker、Maven、kubectl、Helm 等高权限构建操作从 Jenkins 控制器隔离 | 以容器运行，主动连接控制器；执行检出、测试、镜像构建和 K3s 部署。 |
+| `devops-jenkins` | Jenkins 控制器容器 | 集中保存 Job、凭据引用和构建记录，但不直接访问 Docker Socket | 仅监听本机 `127.0.0.1:18090`，由 `devops-build` 执行实际构建。 |
+| `devops-nexus` | Maven 制品与 Docker 镜像私服 | 让构建产物和运行镜像可追溯、可复用，不依赖公网镜像仓库 | 使用独立账号提供 Maven 发布、镜像推送和 K3s 拉取。 |
+| `k3s-kubeconfig` | Jenkins 访问 K3s 的受限配置文件 | 让部署身份只拥有 `dev`、`test` 中的工作负载权限，避免使用集群管理员 | 作为 Jenkins Secret file 凭据；7 天令牌到期前轮换。 |
+
 ## 4. 第一阶段：本地开发闭环
 
-### 4.1 已完成内容
+### 4.1 关联文档
+
+- [本地基础依赖说明](../infra/local/README.md)
+- [项目设计文档](PROJECT_DESIGN.md)
+- [端口总表](PORT_INVENTORY.md)
+
+### 4.2 已完成内容
 
 - Docker Desktop 可以启动 PostgreSQL 和 Redis。
 - Spring Boot 后端可以启动。
@@ -55,7 +85,7 @@
 - 前端工作台和项目列表页面已经具备。
 - 后端测试和前端构建已经通过。
 
-### 4.2 本地启动方式
+### 4.3 本地启动方式
 
 ```bash
 cd /Users/vincent/Projects/AiCode/devops/devops-platform/infra/local
@@ -79,7 +109,7 @@ npm ci
 npm run dev
 ```
 
-### 4.3 第一阶段验收标准
+### 4.4 第一阶段验收标准
 
 - PostgreSQL 容器状态为 `running`。
 - Redis 容器状态为 `running`。
@@ -93,7 +123,12 @@ npm run dev
 
 第二阶段开发与前端人工验收均已完成，已形成项目、环境、微服务的完整管理闭环。
 
-### 5.1 第二阶段目标
+### 5.1 关联文档
+
+- [项目设计文档](PROJECT_DESIGN.md)
+- [项目记忆](../PROJECT_MEMORY.md)
+
+### 5.2 第二阶段目标
 
 打通以下业务链路：
 
@@ -104,12 +139,12 @@ npm run dev
     ↓
 绑定微服务
     ↓
-配置 Gitee 仓库
+配置 GitHub 仓库
     ↓
 保存服务构建和部署参数
 ```
 
-### 5.2 第二阶段开发顺序
+### 5.3 第二阶段开发顺序
 
 #### 第 1 步：完善项目管理
 
@@ -201,7 +236,7 @@ staging
 | project_id | 所属项目 |
 | service_code | 服务编码 |
 | service_name | 服务名称 |
-| repository_url | Gitee 仓库地址 |
+| repository_url | GitHub 仓库地址 |
 | branch_name | 构建分支 |
 | build_type | Maven、Node.js 等构建类型 |
 | image_repository | Docker 镜像地址 |
@@ -231,7 +266,7 @@ staging
 验收标准：
 
 - 一个项目可以拥有多个微服务。
-- 微服务可以绑定 Gitee 仓库和分支。
+- 微服务可以绑定 GitHub 仓库和分支。
 - 微服务可以配置镜像仓库地址。
 - 微服务可以配置副本、CPU 和内存。
 - 停用的微服务不能进入后续部署流程。
@@ -284,7 +319,7 @@ staging
 - 数据库迁移脚本、接口注释、页面操作说明和回滚方式已经记录。
 - 后端测试、前端构建和关键接口验证通过。
 
-### 5.2.1 当前完成情况（2026-10-05）
+### 5.3.1 当前完成情况（2026-10-05）
 
 | 内容 | 状态 | 实际结果 |
 |---|---|---|
@@ -301,7 +336,7 @@ staging
 
 以下内容不属于第二阶段已完成范围：Nexus、Jenkins、K3s、Nacos 实际部署，Docker 镜像自动构建，以及业务 Redis 接入。
 
-### 5.2.2 前端人工确认记录（已完成）
+### 5.3.2 前端人工确认记录（已完成）
 
 2026-10-05，用户已完成第二阶段人工验收并确认通过，第二阶段正式闭环。
 
@@ -314,7 +349,7 @@ staging
 
 验收后已停止本地前端和后端进程；PostgreSQL、Redis 和 Nexus 保持运行，便于后续基础设施工作。
 
-### 5.3 第二阶段数据库表
+### 5.4 第二阶段数据库表
 
 建议新增：
 
@@ -343,7 +378,7 @@ image_artifact
 
 所有数据库结构变更必须通过 Flyway 版本脚本完成，并为重要结构准备回滚说明。
 
-### 5.4 第二阶段不做的内容
+### 5.5 第二阶段不做的内容
 
 - Jenkins API 实际触发。
 - Kubernetes 实际部署。
@@ -357,7 +392,14 @@ image_artifact
 
 Nexus 是后续构建和部署的制品基础设施。第二阶段代码开发不依赖它，但在接入 Jenkins、制作镜像和部署 K3s 前必须完成。
 
-### 6.0 本期搭建方式
+### 6.1 关联文档
+
+- [Nexus 部署说明](../infra/nexus/README.md)
+- [Nexus 运维说明](../infra/nexus/OPERATIONS.md)
+- [端口总表](PORT_INVENTORY.md)
+- [项目记忆](../PROJECT_MEMORY.md)
+
+### 6.2 本期搭建方式
 
 本期采用低资源、单实例的本地方案：
 
@@ -371,7 +413,7 @@ Nexus 是后续构建和部署的制品基础设施。第二阶段代码开发�
 
 选择外部 PostgreSQL 的原因是后续需要保留数据并接入 Jenkins、K3s；平台 PostgreSQL 容器已经存在，复用数据库服务可以少启动一个容器，但 Nexus 数据库必须和平台数据库隔离。
 
-### 6.1 Maven 仓库
+### 6.3 Maven 仓库
 
 ```text
 maven-releases
@@ -380,7 +422,7 @@ maven-central
 maven-public
 ```
 
-### 6.2 Docker 仓库
+### 6.4 Docker 仓库
 
 ```text
 docker-hosted
@@ -388,7 +430,7 @@ docker-proxy
 docker-group
 ```
 
-### 6.3 权限和存储要求
+### 6.5 权限和存储要求
 
 - Jenkins 使用独立的发布账号。
 - K3s 使用独立的镜像拉取账号。
@@ -407,11 +449,11 @@ Docker Desktop：建议分配至少 8 GB，总体建议 10~12 GB
 长期测试服务器：2~4 vCPU、8 GB 以上内存、160 GB 以上 SSD
 ```
 
-### 6.4 实际实施结果与操作说明
+### 6.6 实际实施结果与操作说明
 
 已在本地 Docker Desktop 部署单实例 Nexus，只用于开发人员共享测试，不建设高可用。容器名称为 `devops-nexus`，所有端口仅绑定 `127.0.0.1`。
 
-#### 6.4.1 部署前检查
+#### 6.6.1 部署前检查
 
 - 确认 Docker Desktop 正常运行。
 - 已确认并使用宿主机 `18081`、`18082`、`18083`、`18084`，分别映射 Nexus 容器 `8081`、`8082`、`8083`、`8084`。
@@ -420,7 +462,7 @@ Docker Desktop：建议分配至少 8 GB，总体建议 10~12 GB
 - 管理员密码、Jenkins 发布账号和 K3s 拉取账号分别保存，不写入 Git。
 - 本地先使用 HTTP 验证链路；后续正式服务器再配置域名和 HTTPS。
 
-#### 6.4.2 PostgreSQL 准备
+#### 6.6.2 PostgreSQL 准备
 
 在现有 `devops-postgres` 中新增独立的 Nexus 数据库，执行顺序如下：
 
@@ -434,7 +476,7 @@ Docker Desktop：建议分配至少 8 GB，总体建议 10~12 GB
 
 以上对象已由 `infra/nexus/scripts/init_nexus_database.py` 创建并复核；Nexus 连接池已限制为 10，避免默认连接池耗尽 PostgreSQL 的连接上限。
 
-#### 6.4.3 Nexus Compose 配置
+#### 6.6.3 Nexus Compose 配置
 
 已创建并投入使用以下文件：
 
@@ -465,7 +507,7 @@ python3 infra/nexus/scripts/bootstrap_nexus.py
 docker compose --env-file infra/nexus/.env -f infra/nexus/docker-compose.yml ps
 ```
 
-#### 6.4.4 建议的本地仓库端口
+#### 6.6.4 建议的本地仓库端口
 
 | 用途 | Nexus 仓库 | 建议端口 |
 |---|---|---:|
@@ -474,7 +516,7 @@ docker compose --env-file infra/nexus/.env -f infra/nexus/docker-compose.yml ps
 | Docker 公共镜像代理 | `docker-proxy` | `127.0.0.1:18083` |
 | Docker 统一拉取入口 | `docker-group` | `127.0.0.1:18084` |
 
-#### 6.4.5 Nexus 初始化和仓库配置
+#### 6.6.5 Nexus 初始化和仓库配置
 
 1. 访问 `http://127.0.0.1:18081`，等待管理页面和健康检查可用。
 2. `bootstrap_nexus.py` 会在首次执行时读取一次性 `admin.password`，并立即替换为 `infra/nexus/.env` 中的 `NEXUS_ADMIN_PASSWORD`；后续不会重置已存在账号密码。
@@ -484,7 +526,7 @@ docker compose --env-file infra/nexus/.env -f infra/nexus/docker-compose.yml ps
 6. 本地只使用端口连接器访问 Docker 仓库；同一 Nexus 实例不能同时混用端口连接器、路径路由和子域名路由。
 7. Maven、Docker 和管理员密码仅保存在受保护的 `.env` 与本机 `LOCAL_CREDENTIALS.txt`，不得写入 Git 或 Jenkinsfile。
 
-#### 6.4.6 Nexus 验证顺序
+#### 6.6.6 Nexus 验证顺序
 
 1. Nexus REST 健康检查、仓库 REST 接口，以及 Maven Central 经 `maven-public` 的代理下载均返回 HTTP `200`。
 2. 使用 `jenkins-publisher` 成功向 `maven-releases` 发布唯一 Release 测试制品、向 `maven-snapshots` 发布唯一 Snapshot 测试制品；两者均经 `maven-public` 下载并通过 SHA-256 内容校验。
@@ -492,56 +534,37 @@ docker compose --env-file infra/nexus/.env -f infra/nexus/docker-compose.yml ps
 4. 使用 `k3s-puller` 成功经 `127.0.0.1:18083` 的 `docker-proxy` 和 `127.0.0.1:18084` 的 `docker-group` 拉取 Docker Hub `hello-world:latest`，验证上游代理链路与两个连接器均可用。
 5. 重启 `devops-nexus` 后，容器健康状态恢复为 `healthy`；此前发布的 Maven Release 制品仍可下载且 SHA-256 内容一致。
 6. 本机 Docker Desktop 已可访问回环地址的 HTTP Docker 仓库，未额外修改 Docker Engine 配置；部署到测试服务器时仍必须使用 HTTPS 反向代理。
-7. Nexus 验收已通过，下一步执行本计划 5.2.2 的前端人工验收；完成后再进入 K3s。
+7. Nexus 验收已通过，下一步执行本计划 5.3.2 的前端人工验收；完成后再进入 K3s。
 
-#### 6.4.7 Nexus 阶段验收标准
+#### 6.6.7 Nexus 阶段验收标准
 
 - [x] Nexus 重启后仓库、账号和 Maven 测试制品仍然存在。
 - [x] Maven 依赖可以从 `maven-public` 下载，正式包和快照包可以分别发布。
 - [x] Docker 镜像可以推送到 `docker-hosted`，并可以从 `docker-group` 拉取。
 - [x] Jenkins 发布账号与 K3s 拉取账号均已按最小权限创建，并已分别完成发布和拉取验证；两者访问 Nexus 管理接口均返回 HTTP `403`。
 - [x] Nexus 数据目录、Blob Store、外部 PostgreSQL 数据库和受保护配置均已纳入备份范围。
-- [x] 已制定 Maven、Docker 代理缓存和私有制品的分级清理策略；策略当前为草案，尚未关联仓库或执行删除。
+- [x] 已制定 Maven、Docker 代理缓存和私有制品的分级清理策略；Snapshot、Maven Central 和 Docker Proxy 策略已关联，私有 Docker 镜像和 Maven Release 保持不自动清理。
 
-#### 6.4.8 清理策略与可恢复备份演练记录
+#### 6.6.8 清理策略与可恢复备份演练记录
 
 1. 已新增 [Nexus 运维说明](../infra/nexus/OPERATIONS.md)，明确 Maven Snapshot、Maven Central 缓存、Docker Proxy 缓存、私有 Docker 镜像和 Maven Release 的不同处理规则；任何策略首次关联前必须通过 Nexus 管理界面预览。
 2. 已于 2026-10-05 创建同一恢复点的 Nexus 数据卷归档、独立 PostgreSQL 自定义归档、受保护配置副本及不含密码的 SHA-256 清单，统一保存在 `~/.codex/backups/`。
 3. 已在隔离资源中完成恢复验证：`nexus_restore_20261004200121` 数据库恢复后包含 `204` 张表，临时 Nexus 健康接口及 `10` 个仓库均可查询。
 4. 原 `devops-nexus` 已自动恢复为 `healthy`；未删除原数据库、原数据卷或任何制品。
 5. 验证副本容器 `devops-nexus-restore-20261004200121` 已停止，隔离数据库和数据卷保留待复查；删除这些隔离资源属于破坏性操作，未执行。
+6. 已配置自定义敏感配置加密密钥，并于 2026-10-21 使用包含密钥的备份完成隔离恢复验证：数据库包含 `204` 张表，健康接口通过，`10` 个仓库可查询。隔离容器已停止，隔离数据库和数据卷保留；未逐项验证加密凭据或所有制品下载。详情见 [Nexus 运维说明](../infra/nexus/OPERATIONS.md)。
 
 ## 7. 第四阶段：搭建 K3s 测试集群
 
 第一期采用单节点 K3s，运行测试环境和业务微服务。
 
-### 7.0 当前实施记录
+### 7.1 关联文档
 
-- 已按 [K3s 操作说明](../infra/k3s/README.md) 在 macOS Docker Desktop 上安装 `k3d 5.9.0`、`helm 4.3.0`，创建单节点 `devops-test` 集群（K3s `v1.35.5+k3s1`）。
-- `16443`、`18088`、`18443` 分别已映射 API、HTTP、HTTPS；节点、五个 Namespace、Nexus `imagePullSecret`、Docker Group 镜像拉取和 HTTP Ingress 均已实际验证。
-- 项目 Helm Chart 通过 `helm lint`；当前未部署平台工作负载，原因是尚无可部署的平台镜像以及集群内 PostgreSQL、Redis Service。
+- [K3s 操作说明](../infra/k3s/README.md)
+- [端口总表](PORT_INVENTORY.md)
+- [项目记忆](../PROJECT_MEMORY.md)
 
-### 7.1 基础组件
-
-- K3s。
-- Ingress。
-- StorageClass。
-- Namespace。
-- Kubernetes Secret。
-- Nexus 镜像拉取凭证。
-- 日志和资源限制。
-
-### 7.2 Namespace 规划
-
-```text
-platform-infra
-devops-platform
-dev
-test
-staging
-```
-
-### 7.3 部署顺序
+### 7.2 部署顺序
 
 ```text
 K3s
@@ -557,24 +580,55 @@ DevOps 平台
 业务微服务
 ```
 
-## 8. 第五阶段：接入 Jenkins
+### 7.3 基础组件
 
-Jenkins 负责统一构建、测试、制作镜像和部署。
+- K3s。
+- Ingress。
+- StorageClass。
+- Namespace。
+- Kubernetes Secret。
+- Nexus 镜像拉取凭证。
+- 日志和资源限制。
 
-### 8.0 当前实施记录
-
-- 已使用固定镜像 `jenkins/jenkins:2.580.1-lts-jdk21` 启动 `devops-jenkins`，并创建独立 `devops-jenkins-home` 数据卷；`127.0.0.1:18090/login` 和重启持久化均已通过。
-- Jenkins 初始解锁密码曾安全同步至 `LOCAL_CREDENTIALS.txt`；正式管理员已于 2026-10-05 创建后，该一次性记录应由管理员手工更新或清除。该文件及 Jenkins `.env` 均受 Git 忽略且权限为 600。
-- 用户提供的界面截图确认：首次管理员创建完成、已进入 Jenkins 控制台，且初始化时已选择安装建议插件；该项证据质量等级为 B。
-- 已安装并重启复核 Jenkins 流水线最小插件：Pipeline、Git、Credentials Binding、Docker Pipeline、Kubernetes CLI、Maven Integration；控制器恢复后登录页返回 HTTP `200`，证据质量等级为 A。
-- 插件安装前已备份 Jenkins Home；安装后的控制器与登录入口均恢复正常，未发生回滚。
-- 已应用并验证 Namespace 级 Jenkins 部署 RBAC 清单；该清单只覆盖 `dev`、`test` 的应用部署资源，未创建长期访问令牌。流水线将使用 `HELM_DRIVER=configmap` 保存发布记录，避免授予 Jenkins 读取 Kubernetes Secret 的权限。
-- `Jenkinsfile.example`、`settings.xml.example` 已切换为本机 Nexus 地址、专用构建 Agent 和受限 `dev`、`test` 部署方式；尚未在 Jenkins 中创建 Job 执行。
-- Nexus / K3s Credentials、构建 Agent、首条流水线与 Gitee Webhook 尚未接入。Docker Desktop 对 `host.docker.internal:18082` 的 HTTP 信任、Gitee 外部 Token、仓库地址与回调配置均属待确认项。
-
-### 8.1 标准流水线
+### 7.4 Namespace 规划
 
 ```text
+platform-infra
+devops-platform
+dev
+test
+staging
+```
+
+### 7.5 当前实施记录
+
+- 已按 [K3s 操作说明](../infra/k3s/README.md) 在 macOS Docker Desktop 上安装 `k3d 5.9.0`、`helm 4.3.0`，创建单节点 `devops-test` 集群（K3s `v1.35.5+k3s1`）。
+- `16443`、`18088`、`18443` 分别已映射 API、HTTP、HTTPS；节点、五个 Namespace、Nexus `imagePullSecret`、Docker Group 镜像拉取和 HTTP Ingress 均已实际验证。
+- 项目 Helm Chart 通过 `helm lint`；当前未部署平台工作负载，原因是尚无可部署的平台镜像以及集群内 PostgreSQL、Redis Service。
+
+## 8. 第五阶段：接入多仓库发布能力与 Jenkins
+
+DevOps 平台负责项目级发布规则与记录，Jenkins 负责统一构建、测试、制作镜像和部署。第五阶段的目标是同时支持每个服务独立仓库和单仓库多模块，不将当前固定的 `devops-platform-server` 示例 Job 直接扩展为多项目方案。
+
+### 8.1 关联文档
+
+- [Jenkins 操作说明](../infra/jenkins/README.md)
+- [端口总表](PORT_INVENTORY.md)
+- [项目记忆](../PROJECT_MEMORY.md)
+
+### 8.2 发布模型与执行边界
+
+平台必须先将 GitHub/Gitee 事件标准化为仓库、分支、提交号和变更文件列表，再根据服务的构建定义和环境发布策略创建构建记录。独立仓库默认匹配整个仓库；单仓库多模块只匹配配置的模块目录和变更路径。公共目录变更必须使用已配置策略处理，生产环境默认不自动部署。
+
+平台提供手动构建、手动部署和接收代码事件三种入口；三者都使用同一个构建记录和部署记录模型。Jenkins 仅接收已校验的构建参数，并将执行结果回写平台。
+
+### 8.3 标准流水线
+
+```text
+平台接收手动请求或有效代码事件
+  ↓
+创建构建记录并传递项目、服务、环境、提交号和构建定义
+  ↓
 Checkout
   ↓
 Maven 编译和测试
@@ -590,35 +644,68 @@ Helm 校验
 部署 K3s
   ↓
 健康检查
+  ↓
+回写平台构建、镜像版本和部署状态
 ```
 
-### 8.2 Jenkins 接入内容
+### 8.4 实施顺序与验收标准
 
-- Gitee Webhook。
+1. 新增代码仓库、服务构建定义、服务环境发布策略、构建记录、镜像版本和部署记录的数据模型，并通过 Flyway 迁移已有服务的仓库字段。
+2. 提供 GitHub/Gitee 仓库配置与凭据引用管理；任何令牌、私钥和 Webhook 密钥不得保存或回显为明文。
+3. 实现 GitHub/Gitee Webhook 验签、去重、分支过滤和变更路径匹配。
+4. 实现平台到 Jenkins 的参数化触发和 Jenkins 回调验签；保留现有示例 Job 仅用于基础设施验证。
+5. 实现服务-环境发布策略：`MANUAL_ONLY`、`AUTO_BUILD_MANUAL_DEPLOY`、`AUTO_BUILD_AUTO_DEPLOY`。
+6. 完成独立仓库和单仓库多模块的自动、手动、失败和重复投递场景验证。
+
+验收标准：
+
+- GitHub、Gitee 的有效提交事件均能被验签、去重并正确关联仓库。
+- 独立仓库 Express 的提交只触发 Express；单仓库 `services/express/**` 的提交只触发 Express。
+- 公共目录变更严格按已配置策略执行，生产环境不会因代码提交自动部署。
+- 手动构建和手动部署与自动触发使用同一记录模型，均可查询日志、镜像 Digest 和部署结果。
+- Jenkins 失败、超时或重复回调不会覆盖成功版本或产生重复部署。
+
+### 8.5 Jenkins 接入内容
+
+- GitHub/Gitee Webhook。
 - Jenkins Credentials。
 - Maven settings.xml。
 - Nexus Maven 地址。
 - Nexus Docker 地址。
 - K3s 部署凭证。
-- Jenkins 构建日志。
-- 构建记录保存策略。
-- 构建失败通知。
+- 平台构建与部署记录。
+- Jenkins 回调签名与幂等处理。
 
-### 8.3 流水线验收标准
+### 8.6 当前实施记录
 
-- Gitee 提交可以触发 Jenkins。
-- Maven 测试失败时流水线停止。
-- 构建成功后 Maven 制品上传到 Nexus。
-- Docker 镜像上传到 Nexus。
-- K3s 可以从 Nexus 拉取镜像。
-- 部署后健康检查可以通过。
-- 部署记录可以查询。
+- 已使用固定镜像 `jenkins/jenkins:2.580.1-lts-jdk21` 启动 `devops-jenkins`，并创建独立 `devops-jenkins-home` 数据卷；`127.0.0.1:18090/login` 和重启持久化均已通过。
+- Jenkins 初始解锁密码曾安全同步至 `LOCAL_CREDENTIALS.txt`；正式管理员已于 2026-10-05 创建后，该一次性记录应由管理员手工更新或清除。该文件及 Jenkins `.env` 均受 Git 忽略且权限为 600。
+- 用户提供的界面截图确认：首次管理员创建完成、已进入 Jenkins 控制台，且初始化时已选择安装建议插件；该项证据质量等级为 B。
+- 已安装并重启复核 Jenkins 流水线最小插件：Pipeline、Git、Credentials Binding、Docker Pipeline、Kubernetes CLI、Maven Integration；控制器恢复后登录页返回 HTTP `200`，证据质量等级为 A。
+- 插件安装前已备份 Jenkins Home；安装后的控制器与登录入口均恢复正常，未发生回滚。
+- 已应用并验证 Namespace 级 Jenkins 部署 RBAC 清单；该清单只覆盖 `dev`、`test` 的应用部署资源，未创建长期访问令牌。流水线将使用 `HELM_DRIVER=configmap` 保存发布记录，避免授予 Jenkins 读取 Kubernetes Secret 的权限。
+- `Jenkinsfile.example`、`settings.xml.example` 已切换为本机 Nexus 地址、专用构建 Agent 和受限 `dev`、`test` 部署方式；该流水线仅验证平台自身的基础设施，不能作为多项目发布流水线直接复用。
+- 已新增显式启用的专用构建 Agent Compose 配置，控制器不挂载 Docker Socket，Socket 仅在 Agent 服务中使用。构建过程曾两次受 Docker Hub 镜像元数据请求超时影响；网络恢复后已生成 `devops-jenkins-agent:local`。2026-10-24 已注册并启动 `devops-build`，Jenkins 节点页显示在线，Agent 容器无重启；已实际复核 JDK、Maven、Docker CLI、kubectl 和 Helm。
+- 已复核 `platform-infra/jenkins-deployer` 的实际权限：可修改 `dev`、`test` Deployment，不能读取 Secret、列出 Namespace 或读取节点。
+- 2026-10-23 在 Jenkins 凭据页面确认三个 Nexus / K3s 凭据已创建，尚未通过流水线验证；2026-10-24 已将 `k3s-kubeconfig` 轮换为 7 天令牌并替换 Jenkins 同名凭据，新令牌于 2026-10-31 01:39:09（北京时间）到期。2026-10-24 已完成 Agent 节点注册和启动，并创建 `devops-platform-server` GitHub Pipeline Job；构建 #1 在保存流水线定义前启动，未进入检出或发布阶段。Docker Desktop 对 `host.docker.internal:18082` 的 HTTP 信任，以及 GitHub 回调所需的公网 HTTPS 入口仍待处理。
+- 已新增并实际执行 `V6__create_release_configuration.sql` 与 `V7__create_release_execution_records.sql`：分别定义仓库、构建定义、环境发布策略，以及构建、镜像、部署记录。Flyway 已成功从 v5 升至 v7；5 条现有测试服务已生成默认 GitHub 仓库与构建定义，8 条服务环境关联已生成仅手动发布策略。旧 `service` 字段仍保留，以兼容当前接口；V7 迁移完成时三类执行记录为空，现已由平台接口负责写入。
+- 已新增服务级发布配置接口和微服务管理页的“构建配置”入口：可统一维护代码平台、仓库地址、凭据引用、单仓库模块目录、变更路径、构建方式、Dockerfile、镜像仓库及已关联环境的发布策略。接口按项目权限校验，凭据字段只保存引用；后端单元测试和前端构建均已通过，真实登录态接口及浏览器人工交互待后续启动服务后验收。
+- 新建微服务已自动创建模拟发布配置：默认代码平台为 GitHub，仓库标识使用服务编码，源码根目录为 `/`，变更路径为 `["/**"]`，构建工作目录和 Docker 构建上下文均为 `.`，Dockerfile 为 `Dockerfile`；每个新关联环境默认采用 `MANUAL_ONLY` 且需要人工确认。2026-10-28 已通过真实接口创建 `release-config-sim` 验证：服务、仓库、构建定义和 `test` 环境策略均返回正确；未生成真实 Token、Webhook 密钥或 Jenkins 凭据。
+- 已补齐平台内部执行记录接口：`/release-executions` 下提供构建记录、镜像制品和部署记录的创建、查询及状态回写；构建状态支持 `PENDING → RUNNING → SUCCESS/FAILED/CANCELED`，镜像支持 `PENDING → PUBLISHED/FAILED`，部署支持 `PENDING → RUNNING → SUCCESS/FAILED/CANCELED`。接口校验项目、微服务、环境、发布策略和镜像归属，Webhook 外部事件按仓库和事件 ID 幂等，重复提交同一部署请求返回同一部署记录。2026-10-28 已使用本地 PostgreSQL 测试库完成真实接口联调，构建、镜像和部署三条记录链路均成功；后端 `mvn -q clean test` 共 40 项测试通过；未调用真实 Jenkins、镜像仓库或 K3s。
+- 已新增独立 `integration` 适配层：GitHub Webhook HMAC 验签、事件标准化、分支和变更路径匹配；Jenkins 参数化构建 HTTP 客户端及 HMAC 回调；K3s Helm 部署和回滚命令封装。平台在构建记录事务提交后才派发 Jenkins 任务，成功后保存 Job 名称和队列地址；派发失败会以不泄露外部细节的摘要标记构建失败。Jenkins 回调成功且镜像仓库、tag、digest 三项完整时，平台自动创建并发布镜像制品记录。Jenkins 集成默认关闭，所有外部客户端均可替换为测试替身；后端 `mvn -q clean test` 共 47 项测试通过。前端已在微服务行内提供“发布记录”抽屉，分栏展示构建、镜像制品和部署记录，并使用请求版本号防止快速切换服务时旧响应覆盖当前结果；前端 `npm run build` 已通过。当前 V7 模型将一次构建记录绑定一个环境且按仓库事件去重，同一仓库多环境 Webhook 暂按首个匹配目标创建一条构建记录，后续需要明确多环境构建模型后再扩展。服务级 Helm Chart 路径和 Release 名称尚未建模，因此 Jenkinsfile 中 `DEPLOY_ENABLED` 默认关闭，暂不自动部署 K3s，避免误用固定模板部署错误服务。
+- 2026-10-28 已在 `/Users/vincent/Projects/AiCode/devops/devops-demo-service` 创建无数据库、缓存和配置中心依赖的最小 Maven 验证服务；包含健康检查、Dockerfile、Jenkins Maven 设置和独立 Helm Chart。`mvn -q clean verify` 与 `helm lint`、`helm template` 均通过。2026-10-29 已创建并推送私有 GitHub 仓库 `V-Vincen/devops-demo-service` 的 `main` 分支。该仓库将用于真实 Jenkins、Nexus、签名回调和 K3s 链路验证；因其为私有仓库，必须先将最小只读 Git SSH 凭据接入通用 Jenkinsfile 的检出步骤，之后才能触发真实构建。Docker 镜像尚未构建。
 
 ## 9. 第六阶段：启用 Nacos
 
 Nacos 当前不作为 DevOps 平台启动依赖。只有在业务微服务需要配置中心和服务发现时启用。
 
-### 9.1 Nacos 部署方式
+### 9.1 关联文档
+
+- [Nacos 部署说明](../infra/k8s/nacos/README.md)
+- [端口总表](PORT_INVENTORY.md)
+- [项目设计文档](PROJECT_DESIGN.md)
+
+### 9.2 Nacos 部署方式
 
 - 单实例。
 - 使用外部 PostgreSQL。
@@ -627,7 +714,7 @@ Nacos 当前不作为 DevOps 平台启动依赖。只有在业务微服务需要
 - 开启认证。
 - 仅允许内网访问。
 
-### 9.2 配置迁移范围
+### 9.3 配置迁移范围
 
 迁移到 Nacos：
 
@@ -645,7 +732,7 @@ Nacos 当前不作为 DevOps 平台启动依赖。只有在业务微服务需要
 - 私钥和证书。
 - 平台启动所需的基础连接信息。
 
-### 9.3 配置组织方式
+### 9.4 配置组织方式
 
 ```text
 Namespace：dev、test、staging
@@ -656,6 +743,14 @@ DataId：服务配置文件名
 ## 10. 第七阶段：Redis 业务能力
 
 Redis 当前已作为本地和测试环境基础设施准备，但平台第一期不强制使用。
+
+### 10.1 关联文档
+
+- [Redis 部署说明](../infra/k8s/redis/README.md)
+- [端口总表](PORT_INVENTORY.md)
+- [项目设计文档](PROJECT_DESIGN.md)
+
+### 10.2 业务接入规划
 
 后续按实际业务接入：
 
@@ -677,7 +772,13 @@ project-a:test:*
 
 ## 11. 第八阶段：安全和运维
 
-### 11.1 安全
+### 11.1 关联文档
+
+- [Nexus 运维说明](../infra/nexus/OPERATIONS.md)
+- [端口总表](PORT_INVENTORY.md)
+- [项目记忆](../PROJECT_MEMORY.md)
+
+### 11.2 安全
 
 - 登录认证。
 - RBAC 权限控制。
@@ -688,7 +789,7 @@ project-a:test:*
 - 对外访问统一使用 HTTPS。
 - PostgreSQL、Redis、Nacos 只允许内网访问。
 
-### 11.2 审计
+### 11.3 审计
 
 记录以下信息：
 
@@ -700,7 +801,7 @@ project-a:test:*
 - 请求来源。
 - 失败原因。
 
-### 11.3 备份
+### 11.4 备份
 
 - PostgreSQL 每日备份。
 - Nexus 数据目录定期备份。
@@ -708,7 +809,7 @@ project-a:test:*
 - Jenkins 配置定期备份。
 - 保留最近 7~30 天备份。
 
-### 11.4 监控
+### 11.5 监控
 
 初期关注：
 
@@ -726,7 +827,7 @@ project-a:test:*
 
 当前按照以下统一顺序执行：
 
-第二阶段与第三阶段均已完成验收；第四阶段开始前先完成 Nexus 清理策略和备份演练。
+第二、三、四阶段与 Nexus 清理策略、备份和隔离恢复演练均已完成验收；当前推进第五阶段的双仓库发布模型、平台编排和通用流水线。
 
 ### 第二阶段：项目、环境和微服务管理
 
@@ -749,7 +850,7 @@ project-a:test:*
 8. [x] 记录第二阶段前端人工验收结果。
 9. [x] 制定 Nexus 清理策略，并完成一致性备份和隔离恢复演练。
 10. [x] 完成第四阶段：单节点 K3s、Namespace、Nexus 镜像拉取和 HTTP Ingress 已验收。
-11. [~] 第五阶段进行中：Jenkins 控制器、端口、持久化、首次管理员和建议插件已验收；待最小权限 Credentials、构建 Agent 与流水线接入。
+11. [~] 第五阶段进行中：Jenkins 基础设施、构建 Agent 和凭据已准备；待开发双仓库模型、平台编排、实际流水线和外部回调。
 12. [ ] 开始第六阶段：启用 Nacos。
 13. [ ] 开始第七阶段：按实际场景接入 Redis。
 
@@ -768,18 +869,23 @@ project-a:test:*
 
 ## 14. 下一步执行计划
 
-1. 创建 `nexus-maven-publish`、`nexus-docker-push`、`k3s-kubeconfig` Jenkins Credentials，基于 [Jenkinsfile.example](../infra/jenkins/Jenkinsfile.example) 验证 Maven、镜像、Helm 流水线。
-2. 部署标签为 `devops-build` 的最小构建 Agent，构建并发布平台镜像；补齐集群内 PostgreSQL、Redis Service 后部署 Helm Chart，验证健康检查和 Helm 回滚。
-3. 将 `host.docker.internal:18082` 调整为受信任的 TLS 镜像仓库，或经确认后配置 Docker Desktop 的 HTTP 例外，再验证镜像推送。
-4. Gitee Webhook、外部 Token、仓库地址、域名和 HTTPS 等依赖外部账号或决策的内容，若未提供则跳过并记录为待确认。
+1. 已执行并核验 V6、V7：六张表、索引、约束和默认测试数据迁移均已确认；当前接口已在不改动旧字段的前提下接入新记录模型。
+2. 已实现现有和新建服务的代码仓库、构建定义和环境发布策略接口与前端配置入口；浏览器人工验收按用户要求暂缓，后续再执行独立仓库和单仓库多模块场景。
+3. 已实现平台构建、镜像、部署记录的状态流转，以及 GitHub Webhook 验签、去重、分支过滤和变更路径匹配；下一步接入真实 Webhook 密钥并验证事件到构建记录的完整链路。
+4. 已完成 Jenkins 参数化流水线、事务提交后自动派发、签名回调和镜像制品自动登记；下一步在 Jenkins 配置 `devops-jenkins-callback-secret`、平台受保护环境变量和服务账号，再执行一次真实 Job 验证队列、回调与镜像推送。
+5. 已提供 K3s Helm 部署和回滚适配器；`k3s-kubeconfig` 已更新为 7 天令牌，需在 2026-10-31 01:39:09（北京时间）前轮换。当前不自动部署：须先确认并设计服务级 Helm Chart 路径、Release 名称和目标值文件的存储与审批，再验证 Helm、健康检查和回滚。
+6. 将 `host.docker.internal:18082` 调整为受信任的 TLS 镜像仓库，或经确认后配置 Docker Desktop 的 HTTP 例外，再验证镜像推送。
+7. GitHub/Gitee Webhook 的公网 HTTPS 地址、回调密钥和仓库访问凭据依赖外部账号或决策；未提供时不得伪造验证，记录为待确认。
 
-本轮下一步操作入口：接入 Jenkins 最小权限凭据、构建 Agent 与基础流水线。第二、三、四阶段与 Nexus 恢复演练均已完成。
+本轮下一步操作入口：完成双仓库数据版和迁移方案；基础设施验证继续保留，但不替代平台发布能力验收。
 
 ## 15. 需要后续确认的事项
 
 - 是否采用一台服务器运行全部测试基础设施。
 - Nexus 是否单独使用一台服务器。
-- Gitee 组织和仓库命名规范。
+- GitHub、Gitee 组织和仓库命名规范。
+- 公共目录变更策略：仅构建、构建受影响服务、人工选择或忽略。
+- 生产环境是否允许 `AUTO_BUILD_MANUAL_DEPLOY`，以及何时启用审批流。
 - 测试环境域名和 HTTPS 证书方式。
 - 是否需要接入企业微信、钉钉或邮件通知。
 - 是否需要优先实现用户登录和权限。
@@ -792,3 +898,5 @@ project-a:test:*
 **Nacos**⁴：用于微服务配置管理、注册和服务发现。  
 **Redis**⁵：用于缓存、分布式锁、Session 和幂等控制。  
 **RBAC**⁶：基于角色的权限控制机制。
+**Webhook**⁷：代码平台在提交等事件发生时，向 DevOps 平台发送的通知请求。
+**镜像 Digest**⁸：容器镜像内容的唯一摘要，用于精确定位和回滚版本。

@@ -82,6 +82,20 @@ management:
 devops:
   redis:
     enabled: ${DEVOPS_REDIS_ENABLED:false}
+  integration:
+    github:
+      webhook-secret: ${DEVOPS_GITHUB_WEBHOOK_SECRET:}
+    jenkins:
+      enabled: ${DEVOPS_JENKINS_ENABLED:false}
+      base-url: ${JENKINS_BASE_URL:}
+      username: ${JENKINS_USERNAME:}
+      api-token: ${JENKINS_API_TOKEN:}
+      job-name: ${JENKINS_JOB_NAME:}
+      callback-url: ${DEVOPS_JENKINS_CALLBACK_URL:}
+      callback-secret: ${DEVOPS_JENKINS_CALLBACK_SECRET:}
+    k3s:
+      enabled: ${DEVOPS_K3S_ENABLED:false}
+      timeout-seconds: ${DEVOPS_K3S_TIMEOUT_SECONDS:300}
   security:
     enabled: ${DEVOPS_SECURITY_ENABLED:true}
     bootstrap-admin-username: ${DEVOPS_BOOTSTRAP_ADMIN_USERNAME:admin}

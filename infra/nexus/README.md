@@ -2,6 +2,8 @@
 
 Nexus 同时承载 Maven 私服和 Docker 私有镜像仓库。本期仅用于本机开发测试，所有服务仅绑定 `127.0.0.1`；部署到测试服务器时必须改为 HTTPS 反向代理方案。
 
+`devops-nexus` 是本项目的 Nexus 容器名称。它不是运行平台业务代码的服务，而是构建产物的统一存储点：Maven 制品供后续编译复用，Docker 镜像供 K3s 部署拉取。选择本地单实例是为了让 Jenkins、K3s 和开发人员使用同一份可追溯制品，同时控制当前测试环境的资源成本；生产环境仍需独立 HTTPS 入口、备份策略和高可用方案。
+
 ## 1. 本期端口与存储
 
 | 用途 | 宿主机端口 | Nexus 容器端口 | 仓库或入口 |
@@ -14,6 +16,8 @@ Nexus 同时承载 Maven 私服和 Docker 私有镜像仓库。本期仅用于�
 元数据使用项目 Docker PostgreSQL 的独立 `nexus` 数据库与 `nexus` Schema；Blob Store 与 Nexus 本地运行数据保存在 Docker 具名卷 `devops-nexus-data`。管理员和自动化账号密码的源配置保存在受保护的 `infra/nexus/.env`，并按本机维护要求同步记录到已忽略的 `LOCAL_CREDENTIALS.txt`；不会使用 Nacos 的原生 PostgreSQL `5432`。
 
 ## 2. 首次启动
+
+当前 Compose 配置通过 `NEXUS_SECRETS_KEY_FILE` 指向数据卷内的 `/nexus-data/etc/devops-nexus-secrets.json`。现有实例已配置该密钥；2026-10-21 使用全新空数据卷和隔离 PostgreSQL 验证时，首次启动和重启后健康接口均返回 HTTP `200`，但指定的密钥文件没有自动生成。健康接口可用并不表示自定义密钥已经启用；全新部署后的密钥初始化及下方完整引导流程仍待验证。已有实例必须保留原密钥，不能随意生成替换。密钥维护和备份见 [OPERATIONS.md](OPERATIONS.md)。
 
 在 `infra/nexus` 目录执行：
 
@@ -80,11 +84,11 @@ docker-group     Group，HTTP 连接器 8084，成员顺序：docker-hosted、do
 - 重启 `devops-nexus` 后，容器恢复为 `healthy`，此前发布的 Maven 制品仍可下载且内容一致。
 - 本机回环地址可直接使用 HTTP 连接器；测试服务器和生产环境必须改用 HTTPS 反向代理。
 
-验证期间生成的 Maven 测试制品坐标为 `com.vincent.devops.verification:nexus-verification`，Docker 测试镜像仓库为 `devops-platform-verification`；二者均保留在 Nexus 中作为本期验收记录。后续配置清理策略后可按这些标识清理。
+验证期间生成的 Maven 测试制品坐标为 `com.vincent.devops.verification:nexus-verification`，Docker 测试镜像仓库为 `devops-platform-verification`；二者均保留在 Nexus 中作为本期验收记录。Snapshot 清理策略排除上述 Maven 验收坐标；`docker-hosted` 不设置自动清理。需要删除验收制品时，应先按运维说明复核并单独确认。
 
 ## 6. 制品生命周期、备份与恢复
 
-Nexus 制品清理策略、一次性备份、隔离恢复验证和后续维护命令统一记录在 [OPERATIONS.md](OPERATIONS.md)。备份对象仍固定为 `devops-nexus-data` 数据卷、独立 `nexus` 数据库和受保护的 `infra/nexus/.env`。
+Nexus 制品清理策略、一次性备份、隔离恢复验证和后续维护命令统一记录在 [OPERATIONS.md](OPERATIONS.md)。备份对象包括 `devops-nexus-data` 数据卷、独立 `nexus` 数据库和受保护的 `infra/nexus/.env`；自定义密钥包含在数据卷归档中，必须与同一恢复点的数据库和配置一并保护。
 
 执行一致性备份：
 

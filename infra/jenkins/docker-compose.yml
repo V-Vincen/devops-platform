@@ -19,6 +19,25 @@ services:
         soft: 65536
         hard: 65536
 
+  agent:
+    # 只有显式使用 --profile agent 启动时才创建构建 Agent，避免默认运行时获得 Docker Socket 访问权。
+    profiles: ["agent"]
+    build:
+      context: ./agent
+    image: ${JENKINS_AGENT_IMAGE:-devops-jenkins-agent:local}
+    container_name: devops-jenkins-agent
+    restart: unless-stopped
+    depends_on:
+      - jenkins
+    environment:
+      JENKINS_URL: http://jenkins:8080
+      JENKINS_AGENT_NAME: ${JENKINS_AGENT_NAME:-devops-build}
+      # 实际值仅保存在被 Git 忽略且权限为 600 的 infra/jenkins/.env 中。
+      JENKINS_AGENT_SECRET: ${JENKINS_AGENT_SECRET:-}
+    volumes:
+      # Docker Socket 只提供给构建 Agent；Jenkins 控制器不得挂载该 Socket。
+      - /var/run/docker.sock:/var/run/docker.sock
+
 volumes:
   jenkins-home:
     name: ${JENKINS_HOME_VOLUME:?请在 .env 中设置 JENKINS_HOME_VOLUME}

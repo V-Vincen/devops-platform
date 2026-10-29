@@ -17,13 +17,24 @@ import {
   fetchMicroservice,
   fetchMicroserviceEnvironmentBindings,
   fetchMicroserviceEnvironmentOptions,
+  fetchReleaseConfiguration,
   updateMicroservice,
+  updateReleaseConfiguration,
   updateMicroserviceStatus,
   type Microservice,
   type MicroserviceEnvironmentBinding,
   type MicroserviceEnvironmentOption,
   type MicroserviceStatus,
+  type ReleaseConfiguration,
 } from '../api/microservice'
+import {
+  fetchDeploymentRecords,
+  fetchImageArtifacts,
+  fetchPipelineRuns,
+  type DeploymentRecord,
+  type ImageArtifact,
+  type PipelineRun,
+} from '../api/releaseExecution'
 
 type MicroserviceRow = MicroserviceEnvironmentBinding
 
@@ -48,6 +59,24 @@ const detailVisible = ref(false)
 const createFormRef = ref()
 const editFormRef = ref()
 const detailService = ref<Microservice | null>(null)
+const releaseVisible = ref(false)
+const releaseLoading = ref(false)
+const releaseSubmitting = ref(false)
+const releaseFormRef = ref()
+const releaseTarget = ref<MicroserviceRow | null>(null)
+const releaseForm = reactive({
+  repositoryKey: '', provider: 'GITHUB' as 'GITHUB' | 'GITEE', cloneUrl: '', defaultBranch: 'main', credentialReference: '',
+  sourceRoot: '/', changePathRules: '["/**"]', buildWorkdir: '.', buildType: 'MAVEN', buildCommand: '',
+  dockerfilePath: 'Dockerfile', dockerContextPath: '.', imageRepository: '', environmentPolicies: [] as ReleaseConfiguration['environmentPolicies'],
+})
+const executionVisible = ref(false)
+const executionLoading = ref(false)
+const executionTarget = ref<MicroserviceRow | null>(null)
+const activeExecutionTab = ref('pipeline-runs')
+const pipelineRuns = ref<PipelineRun[]>([])
+const imageArtifacts = ref<ImageArtifact[]>([])
+const deploymentRecords = ref<DeploymentRecord[]>([])
+let executionRequestVersion = 0
 
 const createForm = reactive({
   serviceCode: '',
@@ -90,6 +119,19 @@ const rules = {
   port: [{ required: true, message: '请输入服务端口', trigger: 'change' }],
   replicas: [{ required: true, message: '请输入副本数量', trigger: 'change' }],
   environmentIds: [{ required: true, type: 'array', min: 1, message: '请至少选择一个关联环境', trigger: 'change' }],
+}
+
+const releaseRules = {
+  repositoryKey: [{ required: true, message: '请输入仓库标识', trigger: 'blur' }],
+  cloneUrl: [{ required: true, message: '请输入 Git 克隆地址', trigger: 'blur' }],
+  defaultBranch: [{ required: true, message: '请输入默认分支', trigger: 'blur' }],
+  sourceRoot: [{ required: true, message: '请输入源码根目录', trigger: 'blur' }],
+  changePathRules: [{ required: true, message: '请输入变更路径规则', trigger: 'blur' }],
+  buildWorkdir: [{ required: true, message: '请输入构建工作目录', trigger: 'blur' }],
+  buildType: [{ required: true, message: '请选择构建类型', trigger: 'change' }],
+  dockerfilePath: [{ required: true, message: '请输入 Dockerfile 路径', trigger: 'blur' }],
+  dockerContextPath: [{ required: true, message: '请输入 Docker 构建上下文', trigger: 'blur' }],
+  imageRepository: [{ required: true, message: '请输入镜像仓库', trigger: 'blur' }],
 }
 
 function queryValue(value: unknown) {
@@ -363,6 +405,109 @@ async function openDetail(row: MicroserviceRow) {
   }
 }
 
+async function openReleaseConfiguration(row: MicroserviceRow) {
+  releaseTarget.value = row
+  releaseVisible.value = true
+  releaseLoading.value = true
+  try {
+    const configuration = await fetchReleaseConfiguration(row.projectId, row.id)
+    Object.assign(releaseForm, configuration, {
+      credentialReference: configuration.credentialReference || '',
+      buildCommand: configuration.buildCommand || '',
+      environmentPolicies: configuration.environmentPolicies.map((policy) => ({ ...policy })),
+    })
+  } finally {
+    releaseLoading.value = false
+  }
+}
+
+async function submitReleaseConfiguration() {
+  await releaseFormRef.value.validate()
+  if (!releaseTarget.value) return
+  releaseSubmitting.value = true
+  try {
+    await updateReleaseConfiguration(releaseTarget.value.projectId, releaseTarget.value.id, {
+      repositoryKey: releaseForm.repositoryKey, provider: releaseForm.provider, cloneUrl: releaseForm.cloneUrl,
+      defaultBranch: releaseForm.defaultBranch, credentialReference: releaseForm.credentialReference || null,
+      sourceRoot: releaseForm.sourceRoot, changePathRules: releaseForm.changePathRules, buildWorkdir: releaseForm.buildWorkdir,
+      buildType: releaseForm.buildType, buildCommand: releaseForm.buildCommand || null,
+      dockerfilePath: releaseForm.dockerfilePath, dockerContextPath: releaseForm.dockerContextPath,
+      imageRepository: releaseForm.imageRepository,
+      environmentPolicies: releaseForm.environmentPolicies.map(({ environmentId, releasePolicy, approvalRequired }) => ({ environmentId, releasePolicy, approvalRequired })),
+    })
+    releaseVisible.value = false
+    await loadPage()
+    ElMessage.success('构建与发布配置已保存')
+  } finally {
+    releaseSubmitting.value = false
+  }
+}
+
+/** 同时读取三类只读记录；版本号避免快速切换服务时旧响应覆盖当前抽屉。 */
+async function loadReleaseExecutions() {
+  const target = executionTarget.value
+  if (!target) return
+  const requestVersion = ++executionRequestVersion
+  executionLoading.value = true
+  try {
+    const [runs, artifacts, deployments] = await Promise.all([
+      fetchPipelineRuns(target.projectId, target.id),
+      fetchImageArtifacts(target.projectId, target.id),
+      fetchDeploymentRecords(target.projectId, target.id),
+    ])
+    if (requestVersion !== executionRequestVersion) return
+    pipelineRuns.value = runs
+    imageArtifacts.value = artifacts
+    deploymentRecords.value = deployments
+  } finally {
+    if (requestVersion === executionRequestVersion) {
+      executionLoading.value = false
+    }
+  }
+}
+
+async function openReleaseExecutions(row: MicroserviceRow) {
+  executionTarget.value = row
+  activeExecutionTab.value = 'pipeline-runs'
+  pipelineRuns.value = []
+  imageArtifacts.value = []
+  deploymentRecords.value = []
+  executionVisible.value = true
+  await loadReleaseExecutions()
+}
+
+function closeReleaseExecutions() {
+  executionRequestVersion += 1
+  executionTarget.value = null
+  executionLoading.value = false
+}
+
+function executionStatusType(status: string) {
+  return {
+    SUCCESS: 'success',
+    PUBLISHED: 'success',
+    RUNNING: 'primary',
+    PENDING: 'warning',
+    FAILED: 'danger',
+    CANCELED: 'info',
+  }[status] as 'success' | 'primary' | 'warning' | 'danger' | 'info' | undefined
+}
+
+function executionStatusLabel(status: string) {
+  return {
+    PENDING: '等待中',
+    RUNNING: '执行中',
+    SUCCESS: '成功',
+    FAILED: '失败',
+    CANCELED: '已取消',
+    PUBLISHED: '已发布',
+  }[status] || status
+}
+
+function operationTypeLabel(operationType: DeploymentRecord['operationType']) {
+  return operationType === 'ROLLBACK' ? '回滚' : '部署'
+}
+
 async function toggleStatus(row: MicroserviceRow) {
   const targetStatus: MicroserviceStatus = row.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE'
   const actionText = targetStatus === 'DISABLED' ? '停用' : '启用'
@@ -494,9 +639,11 @@ watch(() => route.fullPath, async () => {
         <el-table-column prop="imageRepository" label="镜像仓库" min-width="220" show-overflow-tooltip />
         <el-table-column prop="status" label="状态" width="100"><template #default="{ row }"><el-tag :type="row.status === 'ACTIVE' ? 'success' : 'info'">{{ row.status === 'ACTIVE' ? '启用' : '停用' }}</el-tag></template></el-table-column>
         <el-table-column prop="createdAt" label="创建时间" min-width="180"><template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template></el-table-column>
-        <el-table-column label="操作" fixed="right" width="270" :resizable="false" class-name="operation-column">
+        <el-table-column label="操作" fixed="right" width="420" :resizable="false" class-name="operation-column">
           <template #default="{ row }">
             <el-button size="small" class="table-action-button action-detail" :icon="View" @click="openDetail(row)">详情</el-button>
+            <el-button size="small" class="table-action-button action-edit" @click="openReleaseConfiguration(row)">构建配置</el-button>
+            <el-button size="small" class="table-action-button action-detail" @click="openReleaseExecutions(row)">发布记录</el-button>
             <el-button size="small" class="table-action-button action-edit" :icon="EditPen" @click="openEdit(row)">修改</el-button>
             <el-button size="small" class="table-action-button" :class="row.status === 'ACTIVE' ? 'action-warning' : 'action-enable'" :icon="SwitchButton" :loading="actionLoadingId === row.id" @click="toggleStatus(row)">{{ row.status === 'ACTIVE' ? '停用' : '启用' }}</el-button>
             <el-button size="small" class="table-action-button action-delete" :icon="Delete" :disabled="row.status === 'ACTIVE'" :loading="batchDeleting" @click="removeServices([row])">删除</el-button>
@@ -548,6 +695,77 @@ watch(() => route.fullPath, async () => {
       <template #footer><el-button @click="editVisible = false">取消</el-button><el-button type="primary" :loading="submitting" @click="submitEdit">保存</el-button></template>
     </el-dialog>
 
+    <el-dialog v-model="releaseVisible" title="构建与发布配置" width="760px">
+      <el-form v-loading="releaseLoading" ref="releaseFormRef" :model="releaseForm" :rules="releaseRules" label-width="128px">
+        <el-form-item label="仓库标识" prop="repositoryKey"><el-input v-model="releaseForm.repositoryKey" placeholder="例如 platform-monorepo" /></el-form-item>
+        <el-form-item label="代码平台"><el-select v-model="releaseForm.provider" class="form-control"><el-option label="GitHub" value="GITHUB" /><el-option label="Gitee" value="GITEE" /></el-select></el-form-item>
+        <el-form-item label="Git 克隆地址" prop="cloneUrl"><el-input v-model="releaseForm.cloneUrl" /></el-form-item>
+        <el-form-item label="默认分支" prop="defaultBranch"><el-input v-model="releaseForm.defaultBranch" /></el-form-item>
+        <el-form-item label="凭据引用"><el-input v-model="releaseForm.credentialReference" placeholder="仅填凭据标识，不填写 Token 或密码" /></el-form-item>
+        <el-form-item label="源码根目录" prop="sourceRoot"><el-input v-model="releaseForm.sourceRoot" placeholder="独立仓库填 /，单仓库填写模块目录" /></el-form-item>
+        <el-form-item label="变更路径规则" prop="changePathRules"><el-input v-model="releaseForm.changePathRules" placeholder='例如 ["services/order/**"]' /></el-form-item>
+        <el-form-item label="构建工作目录" prop="buildWorkdir"><el-input v-model="releaseForm.buildWorkdir" /></el-form-item>
+        <el-form-item label="构建类型" prop="buildType"><el-select v-model="releaseForm.buildType" class="form-control"><el-option label="Maven" value="MAVEN" /><el-option label="Node.js" value="NODE_JS" /><el-option label="Gradle" value="GRADLE" /><el-option label="其他" value="OTHER" /></el-select></el-form-item>
+        <el-form-item label="构建命令"><el-input v-model="releaseForm.buildCommand" placeholder="可选；后续由通用 Pipeline 受控执行" /></el-form-item>
+        <el-form-item label="Dockerfile" prop="dockerfilePath"><el-input v-model="releaseForm.dockerfilePath" /></el-form-item>
+        <el-form-item label="构建上下文" prop="dockerContextPath"><el-input v-model="releaseForm.dockerContextPath" /></el-form-item>
+        <el-form-item label="镜像仓库" prop="imageRepository"><el-input v-model="releaseForm.imageRepository" /></el-form-item>
+        <el-divider content-position="left">环境发布策略</el-divider>
+        <div v-for="policy in releaseForm.environmentPolicies" :key="policy.environmentId" class="form-grid">
+          <el-form-item :label="`${policy.environmentName}（${policy.environmentCode}）`"><el-select v-model="policy.releasePolicy" class="form-control"><el-option label="仅手动发布" value="MANUAL_ONLY" /><el-option label="自动构建，手动部署" value="AUTO_BUILD_MANUAL_DEPLOY" /><el-option label="自动构建并部署" value="AUTO_BUILD_AUTO_DEPLOY" /></el-select></el-form-item>
+          <el-form-item label="人工确认"><el-switch v-model="policy.approvalRequired" active-text="需要" inactive-text="不需要" /></el-form-item>
+        </div>
+      </el-form>
+      <template #footer><el-button @click="releaseVisible = false">取消</el-button><el-button type="primary" :loading="releaseSubmitting" @click="submitReleaseConfiguration">保存</el-button></template>
+    </el-dialog>
+
+    <el-drawer v-model="executionVisible" title="构建与发布记录" size="78%" @closed="closeReleaseExecutions">
+      <div v-loading="executionLoading" class="execution-drawer">
+        <div class="execution-heading">
+          <div>
+            <div class="execution-service-name">{{ executionTarget?.serviceName || '-' }}</div>
+            <div class="execution-service-code">{{ executionTarget?.serviceCode || '-' }}</div>
+          </div>
+          <el-button size="small" class="action-button action-reset" :icon="RefreshLeft" :loading="executionLoading" @click="loadReleaseExecutions">刷新记录</el-button>
+        </div>
+        <el-tabs v-model="activeExecutionTab">
+          <el-tab-pane label="构建记录" name="pipeline-runs">
+            <el-table :data="pipelineRuns" border empty-text="暂无构建记录">
+              <el-table-column prop="id" label="记录 ID" min-width="165" show-overflow-tooltip />
+              <el-table-column prop="triggerType" label="触发方式" min-width="100" />
+              <el-table-column prop="gitRef" label="分支" min-width="150" show-overflow-tooltip />
+              <el-table-column prop="commitSha" label="提交号" min-width="130" show-overflow-tooltip><template #default="{ row }">{{ row.commitSha || '-' }}</template></el-table-column>
+              <el-table-column prop="status" label="状态" width="100"><template #default="{ row }"><el-tag :type="executionStatusType(row.status)">{{ executionStatusLabel(row.status) }}</el-tag></template></el-table-column>
+              <el-table-column label="Jenkins" min-width="170"><template #default="{ row }"><el-link v-if="row.jenkinsBuildUrl" :href="row.jenkinsBuildUrl" target="_blank" type="primary">{{ row.jenkinsJobName || '查看构建' }} #{{ row.jenkinsBuildNumber ?? '-' }}</el-link><span v-else>{{ row.jenkinsJobName || '-' }}</span></template></el-table-column>
+              <el-table-column label="失败原因" min-width="220" show-overflow-tooltip><template #default="{ row }">{{ row.failureSummary || '-' }}</template></el-table-column>
+              <el-table-column label="创建时间" min-width="170"><template #default="{ row }">{{ formatDateTime(row.createdAt) }}</template></el-table-column>
+            </el-table>
+          </el-tab-pane>
+          <el-tab-pane label="镜像制品" name="image-artifacts">
+            <el-table :data="imageArtifacts" border empty-text="暂无镜像制品">
+              <el-table-column prop="id" label="制品 ID" min-width="165" show-overflow-tooltip />
+              <el-table-column prop="imageRepository" label="镜像仓库" min-width="220" show-overflow-tooltip />
+              <el-table-column prop="imageTag" label="标签" min-width="150" show-overflow-tooltip />
+              <el-table-column prop="imageDigest" label="Digest" min-width="240" show-overflow-tooltip />
+              <el-table-column prop="status" label="状态" width="100"><template #default="{ row }"><el-tag :type="executionStatusType(row.status)">{{ executionStatusLabel(row.status) }}</el-tag></template></el-table-column>
+              <el-table-column label="发布时间" min-width="170"><template #default="{ row }">{{ formatDateTime(row.publishedAt) }}</template></el-table-column>
+            </el-table>
+          </el-tab-pane>
+          <el-tab-pane label="部署记录" name="deployments">
+            <el-table :data="deploymentRecords" border empty-text="暂无部署记录">
+              <el-table-column prop="id" label="记录 ID" min-width="165" show-overflow-tooltip />
+              <el-table-column label="操作" min-width="90"><template #default="{ row }">{{ operationTypeLabel(row.operationType) }}</template></el-table-column>
+              <el-table-column prop="helmReleaseName" label="Helm Release" min-width="160" show-overflow-tooltip />
+              <el-table-column prop="helmRevision" label="版本" width="90"><template #default="{ row }">{{ row.helmRevision ?? '-' }}</template></el-table-column>
+              <el-table-column prop="status" label="状态" width="100"><template #default="{ row }"><el-tag :type="executionStatusType(row.status)">{{ executionStatusLabel(row.status) }}</el-tag></template></el-table-column>
+              <el-table-column label="失败原因" min-width="220" show-overflow-tooltip><template #default="{ row }">{{ row.failureSummary || '-' }}</template></el-table-column>
+              <el-table-column label="完成时间" min-width="170"><template #default="{ row }">{{ formatDateTime(row.finishedAt || row.deployedAt || row.createdAt) }}</template></el-table-column>
+            </el-table>
+          </el-tab-pane>
+        </el-tabs>
+      </div>
+    </el-drawer>
+
     <el-drawer v-model="detailVisible" title="微服务详情" size="520px">
       <div v-loading="detailLoading">
         <template v-if="detailService">
@@ -569,3 +787,36 @@ watch(() => route.fullPath, async () => {
     </el-drawer>
   </section>
 </template>
+
+<style scoped>
+.execution-drawer {
+  min-height: 280px;
+}
+
+.execution-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.execution-service-name {
+  color: #172033;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.execution-service-code {
+  margin-top: 4px;
+  color: #77839a;
+  font-size: 12px;
+}
+
+@media (max-width: 768px) {
+  .execution-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+</style>

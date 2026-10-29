@@ -1,53 +1,128 @@
+import groovy.json.JsonOutput
+
+def notifyPlatform(String status, String failureSummary = null) {
+    if (!params.CALLBACK_URL?.trim()) {
+        echo '未提供平台回调地址，跳过状态回写。'
+        return
+    }
+    def payload = JsonOutput.toJson([
+        projectId      : params.PROJECT_ID.toLong(),
+        serviceId      : params.SERVICE_ID.toLong(),
+        pipelineRunId  : params.PIPELINE_RUN_ID.toLong(),
+        status         : status,
+        jobName        : env.JOB_NAME,
+        buildNumber    : env.BUILD_NUMBER.toLong(),
+        buildUrl       : env.BUILD_URL,
+        failureSummary : failureSummary,
+        imageRepository: status == 'SUCCESS' ? params.IMAGE_REPOSITORY : null,
+        imageTag       : status == 'SUCCESS' ? env.RESOLVED_IMAGE_TAG : null,
+        imageDigest    : status == 'SUCCESS' ? env.RESOLVED_IMAGE_DIGEST : null
+    ])
+    writeFile file: '.devops-callback.json', text: payload
+    withCredentials([string(credentialsId: 'devops-jenkins-callback-secret', variable: 'DEVOPS_CALLBACK_SECRET')]) {
+        sh '''#!/bin/sh
+            set -eu
+            set +x
+            signature="$(openssl dgst -sha256 -hmac-env DEVOPS_CALLBACK_SECRET .devops-callback.json | awk '{print $NF}')"
+            curl --fail --silent --show-error \
+              -H 'Content-Type: application/json' \
+              -H "X-DevOps-Signature: sha256:${signature}" \
+              --data-binary @.devops-callback.json \
+              "$CALLBACK_URL"
+        '''
+    }
+}
+
 pipeline {
     // 控制器不执行构建，避免 Maven、Docker 和集群工具扩大控制器权限。
-    agent {
-        label 'devops-build'
-    }
+    agent { label 'devops-build' }
 
     options {
-        // 测试环境只保留有限记录，避免 Jenkins Home 无界增长。
         buildDiscarder(logRotator(numToKeepStr: '30'))
         timestamps()
         disableConcurrentBuilds()
     }
 
     parameters {
-        choice(name: 'DEPLOY_ENV', choices: ['dev', 'test'], description: '目标部署环境')
-        string(name: 'IMAGE_TAG', defaultValue: '', description: '为空时使用 Git Commit ID')
+        string(name: 'PROJECT_ID', defaultValue: '', description: 'DevOps 平台项目 ID')
+        string(name: 'SERVICE_ID', defaultValue: '', description: 'DevOps 平台微服务 ID')
+        string(name: 'PIPELINE_RUN_ID', defaultValue: '', description: 'DevOps 平台构建记录 ID')
+        string(name: 'REPOSITORY_URL', defaultValue: '', description: 'Git 仓库地址')
+        string(name: 'GIT_REF', defaultValue: 'refs/heads/main', description: 'Git 分支引用')
+        string(name: 'COMMIT_SHA', defaultValue: '', description: '期望构建的提交号')
+        choice(name: 'BUILD_TYPE', choices: ['MAVEN'], description: '当前支持的构建类型')
+        string(name: 'BUILD_WORKDIR', defaultValue: '.', description: '仓库内构建目录')
+        string(name: 'DOCKERFILE_PATH', defaultValue: 'Dockerfile', description: '仓库内 Dockerfile 路径')
+        string(name: 'DOCKER_CONTEXT_PATH', defaultValue: '.', description: '仓库内 Docker 构建上下文')
+        string(name: 'IMAGE_REPOSITORY', defaultValue: '', description: '目标镜像仓库')
+        string(name: 'ENVIRONMENT_CODE', defaultValue: '', description: '平台目标环境编码')
+        string(name: 'CALLBACK_URL', defaultValue: '', description: 'DevOps 平台 Jenkins 回调地址')
+        booleanParam(name: 'DEPLOY_ENABLED', defaultValue: false, description: '仅在提供 Helm 定义后启用部署')
+        string(name: 'HELM_CHART_PATH', defaultValue: '', description: '仓库内 Helm Chart 路径')
+        string(name: 'HELM_RELEASE_NAME', defaultValue: '', description: 'Helm Release 名称')
+        string(name: 'K8S_NAMESPACE', defaultValue: '', description: '目标 Kubernetes Namespace')
     }
 
     environment {
-        // Agent 容器通过 Docker Desktop 主机入口访问本机 Nexus，不能使用宿主机 127.0.0.1。
         REGISTRY_HOST = 'host.docker.internal:18082'
-        IMAGE_REPOSITORY = 'host.docker.internal:18082/test/devops-platform-server'
         MAVEN_PUBLIC_URL = 'http://host.docker.internal:18081/repository/maven-public/'
         MAVEN_RELEASES_URL = 'http://host.docker.internal:18081/repository/maven-releases/'
         MAVEN_SNAPSHOTS_URL = 'http://host.docker.internal:18081/repository/maven-snapshots/'
+        MAVEN_SETTINGS_PATH = "${WORKSPACE}/infra/jenkins/settings.xml.example"
     }
 
     stages {
-        stage('Checkout') {
-            steps {
-                checkout scm
-            }
-        }
-
         stage('Validate Parameters') {
             steps {
                 script {
-                    def requestedTag = params.IMAGE_TAG?.trim()
-                    if (requestedTag && !(requestedTag ==~ /[A-Za-z0-9][A-Za-z0-9._-]{0,127}/)) {
-                        error('IMAGE_TAG 仅允许字母、数字、点、下划线和连字符。')
+                    def positiveId = { value -> value?.trim() ==~ /[1-9][0-9]*/ }
+                    def safePath = { value -> value?.trim() == '.' || (value?.trim() ==~ /[A-Za-z0-9][A-Za-z0-9._/-]*/ && !value.contains('..') && !value.startsWith('/')) }
+                    if (!positiveId(params.PROJECT_ID) || !positiveId(params.SERVICE_ID) || !positiveId(params.PIPELINE_RUN_ID)) {
+                        error('PROJECT_ID、SERVICE_ID 和 PIPELINE_RUN_ID 必须是正整数。')
                     }
-                    env.RESOLVED_IMAGE_TAG = requestedTag ?: env.GIT_COMMIT.take(12)
+                    if (!(params.REPOSITORY_URL?.trim() ==~ /https?:\\/\\/[A-Za-z0-9._~:/-]+(?:\\.git)?/)) {
+                        error('REPOSITORY_URL 格式不正确。')
+                    }
+                    if (!(params.GIT_REF?.trim() ==~ /refs\\/heads\\/[A-Za-z0-9._/-]+/)) {
+                        error('GIT_REF 只能是分支引用。')
+                    }
+                    if (!safePath(params.BUILD_WORKDIR) || !safePath(params.DOCKERFILE_PATH) || !safePath(params.DOCKER_CONTEXT_PATH)) {
+                        error('构建目录、Dockerfile 和构建上下文必须是仓库内安全相对路径。')
+                    }
+                    if (!(params.IMAGE_REPOSITORY?.trim() ==~ /[A-Za-z0-9][A-Za-z0-9./:-]{0,499}/)) {
+                        error('IMAGE_REPOSITORY 格式不正确。')
+                    }
+                    def requestedTag = params.COMMIT_SHA?.trim()
+                    if (requestedTag && !(requestedTag ==~ /[A-Za-z0-9][A-Za-z0-9._-]{0,127}/)) {
+                        error('COMMIT_SHA 仅允许字母、数字、点、下划线和连字符。')
+                    }
+                    env.RESOLVED_IMAGE_TAG = requestedTag ? requestedTag.take(128) : env.BUILD_NUMBER
+                    env.IMAGE_REFERENCE = "${params.IMAGE_REPOSITORY}:${env.RESOLVED_IMAGE_TAG}"
+                }
+            }
+        }
+
+        stage('Notify Running') {
+            steps {
+                script { notifyPlatform('RUNNING') }
+            }
+        }
+
+        stage('Checkout') {
+            steps {
+                script {
+                    git branch: params.GIT_REF.replaceFirst('refs/heads/', ''), url: params.REPOSITORY_URL
+                    if (params.COMMIT_SHA?.trim()) {
+                        sh "git checkout --detach '${params.COMMIT_SHA}'"
+                    }
                 }
             }
         }
 
         stage('Maven Test') {
             steps {
-                dir('backend') {
-                    sh 'mvn -s ../infra/jenkins/settings.xml.example -B clean verify'
+                dir(params.BUILD_WORKDIR) {
+                    sh 'mvn -s "$MAVEN_SETTINGS_PATH" -B clean verify'
                 }
             }
         }
@@ -59,11 +134,11 @@ pipeline {
                     usernameVariable: 'NEXUS_MAVEN_USERNAME',
                     passwordVariable: 'NEXUS_MAVEN_PASSWORD'
                 )]) {
-                    dir('backend') {
+                    dir(params.BUILD_WORKDIR) {
                         sh '''#!/bin/sh
                             set -eu
-                            mvn -s ../infra/jenkins/settings.xml.example -B -DskipTests deploy \\
-                              -DaltReleaseDeploymentRepository=nexus-releases::${MAVEN_RELEASES_URL} \\
+                            mvn -s "$MAVEN_SETTINGS_PATH" -B -DskipTests deploy \
+                              -DaltReleaseDeploymentRepository=nexus-releases::${MAVEN_RELEASES_URL} \
                               -DaltSnapshotDeploymentRepository=nexus-snapshots::${MAVEN_SNAPSHOTS_URL}
                         '''
                     }
@@ -82,30 +157,37 @@ pipeline {
                         set -eu
                         set +x
                         printf '%s' "$NEXUS_DOCKER_PASSWORD" | docker login "$REGISTRY_HOST" -u "$NEXUS_DOCKER_USERNAME" --password-stdin
-                        docker build -t "$IMAGE_REPOSITORY:$RESOLVED_IMAGE_TAG" backend
-                        docker push "$IMAGE_REPOSITORY:$RESOLVED_IMAGE_TAG"
+                        docker build --file "$DOCKERFILE_PATH" -t "$IMAGE_REFERENCE" "$DOCKER_CONTEXT_PATH"
+                        docker push "$IMAGE_REFERENCE"
+                        digest="$(docker image inspect "$IMAGE_REFERENCE" --format '{{index .RepoDigests 0}}')"
+                        case "$digest" in
+                          *@sha256:*) printf '%s' "${digest#*@}" > .devops-image-digest ;;
+                          *) echo '未获取到镜像 Digest。' >&2; exit 2 ;;
+                        esac
                     '''
+                    script { env.RESOLVED_IMAGE_DIGEST = readFile('.devops-image-digest').trim() }
                 }
             }
         }
 
         stage('Deploy to K3s') {
+            when { expression { return params.DEPLOY_ENABLED } }
             steps {
+                script {
+                    if (!params.HELM_CHART_PATH?.trim() || !params.HELM_RELEASE_NAME?.trim() || !params.K8S_NAMESPACE?.trim()) {
+                        error('启用部署时必须提供 HELM_CHART_PATH、HELM_RELEASE_NAME 和 K8S_NAMESPACE。')
+                    }
+                }
                 withCredentials([file(credentialsId: 'k3s-kubeconfig', variable: 'K3S_KUBECONFIG')]) {
                     withEnv(["KUBECONFIG=${K3S_KUBECONFIG}", 'HELM_DRIVER=configmap']) {
                         sh '''#!/bin/sh
                             set -eu
-                            case "$DEPLOY_ENV" in
-                              dev|test) ;;
-                              *) echo "不支持的部署环境：$DEPLOY_ENV" >&2; exit 2 ;;
-                            esac
-                            helm upgrade --install devops-platform infra/helm/devops-platform \\
-                              --namespace "$DEPLOY_ENV" \\
-                              --set image.repository="$IMAGE_REPOSITORY" \\
-                              --set-string image.tag="$RESOLVED_IMAGE_TAG" \\
+                            helm upgrade --install "$HELM_RELEASE_NAME" "$HELM_CHART_PATH" \
+                              --namespace "$K8S_NAMESPACE" \
+                              --create-namespace \
+                              --set image.repository="$IMAGE_REPOSITORY" \
+                              --set-string image.tag="$RESOLVED_IMAGE_TAG" \
                               --wait --timeout 5m
-                            kubectl rollout status deployment/devops-platform-devops-platform \\
-                              --namespace "$DEPLOY_ENV" --timeout=180s
                         '''
                     }
                 }
@@ -114,8 +196,14 @@ pipeline {
     }
 
     post {
+        success {
+            script { notifyPlatform('SUCCESS') }
+        }
+        failure {
+            script { notifyPlatform('FAILED', "Jenkins 构建 #${env.BUILD_NUMBER} 失败") }
+        }
         always {
-            archiveArtifacts artifacts: 'backend/target/*.jar', allowEmptyArchive: true
+            archiveArtifacts artifacts: '**/target/*.jar', allowEmptyArchive: true
         }
     }
 }

@@ -22,6 +22,40 @@ export interface Microservice {
 
 export type MicroserviceStatus = Microservice['status']
 
+export interface EnvironmentReleasePolicy {
+  environmentId: string
+  environmentCode: string
+  environmentName: string
+  releasePolicy: 'MANUAL_ONLY' | 'AUTO_BUILD_MANUAL_DEPLOY' | 'AUTO_BUILD_AUTO_DEPLOY'
+  approvalRequired: boolean
+  status: 'ACTIVE' | 'DISABLED'
+}
+
+export interface ReleaseConfiguration {
+  serviceId: string
+  repositoryId: string
+  repositoryKey: string
+  provider: 'GITHUB' | 'GITEE'
+  cloneUrl: string
+  defaultBranch: string
+  credentialReference: string | null
+  buildSpecId: string
+  sourceRoot: string
+  changePathRules: string
+  buildWorkdir: string
+  buildType: string
+  buildCommand: string | null
+  dockerfilePath: string
+  dockerContextPath: string
+  imageRepository: string
+  environmentPolicies: EnvironmentReleasePolicy[]
+}
+
+export type UpdateReleaseConfigurationRequest = Omit<ReleaseConfiguration,
+  'serviceId' | 'repositoryId' | 'buildSpecId' | 'environmentPolicies'> & {
+  environmentPolicies: Pick<EnvironmentReleasePolicy, 'environmentId' | 'releasePolicy' | 'approvalRequired'>[]
+}
+
 export interface MicroserviceQuery {
   keyword?: string
   status?: MicroserviceStatus
@@ -113,6 +147,26 @@ export async function fetchMicroserviceEnvironmentOptions() {
 export async function fetchMicroservice(projectId: string, id: string) {
   const response = await http.get<ApiResponse<Microservice>>(
     `/api/v1/projects/${projectId}/services/${id}`,
+  )
+  return response.data.data!
+}
+
+/** 查询服务的仓库、构建定义和已关联环境的发布策略。 */
+export async function fetchReleaseConfiguration(projectId: string, serviceId: string) {
+  const response = await http.get<ApiResponse<ReleaseConfiguration>>(
+    `/api/v1/projects/${projectId}/services/${serviceId}/release-configuration`,
+  )
+  return response.data.data!
+}
+
+/** 原子更新服务发布配置，避免仓库、构建定义和环境策略只部分保存。 */
+export async function updateReleaseConfiguration(
+  projectId: string,
+  serviceId: string,
+  request: UpdateReleaseConfigurationRequest,
+) {
+  const response = await http.put<ApiResponse<ReleaseConfiguration>>(
+    `/api/v1/projects/${projectId}/services/${serviceId}/release-configuration`, request,
   )
   return response.data.data!
 }

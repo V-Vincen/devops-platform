@@ -18,6 +18,7 @@ import com.vincent.devops.microservice.dto.UpdateMicroserviceStatusRequest;
 import com.vincent.devops.microservice.mapper.MicroserviceMapper;
 import com.vincent.devops.microservice.mapper.ServiceEnvironmentMapper;
 import com.vincent.devops.microservice.service.MicroserviceService;
+import com.vincent.devops.releaseconfig.mapper.ReleaseConfigurationMapper;
 import com.vincent.devops.project.domain.ProjectEntity;
 import com.vincent.devops.project.mapper.ProjectMapper;
 import com.vincent.devops.project.service.ProjectService;
@@ -47,6 +48,7 @@ public class MicroserviceServiceImpl implements MicroserviceService {
     private final EnvironmentMapper environmentMapper;
     private final ProjectService projectService;
     private final EnvironmentService environmentService;
+    private final ReleaseConfigurationMapper releaseConfigurationMapper;
 
     public MicroserviceServiceImpl(
             MicroserviceMapper microserviceMapper,
@@ -54,7 +56,8 @@ public class MicroserviceServiceImpl implements MicroserviceService {
             ProjectMapper projectMapper,
             EnvironmentMapper environmentMapper,
             ProjectService projectService,
-            EnvironmentService environmentService
+            EnvironmentService environmentService,
+            ReleaseConfigurationMapper releaseConfigurationMapper
     ) {
         this.microserviceMapper = microserviceMapper;
         this.serviceEnvironmentMapper = serviceEnvironmentMapper;
@@ -62,6 +65,7 @@ public class MicroserviceServiceImpl implements MicroserviceService {
         this.environmentMapper = environmentMapper;
         this.projectService = projectService;
         this.environmentService = environmentService;
+        this.releaseConfigurationMapper = releaseConfigurationMapper;
     }
 
     @Override
@@ -177,6 +181,7 @@ public class MicroserviceServiceImpl implements MicroserviceService {
 
         // 数据库唯一索引是最终防线；前置查询用于返回更明确的业务提示。
         microserviceMapper.insert(entity);
+        createDefaultReleaseConfiguration(entity, now);
         // 创建和多环境关联处于同一事务，任何环境校验或插入失败都会回滚新建服务。
         bindEnvironments(projectId, entity.getId(), request.uniqueEnvironmentIds());
         return entity;
@@ -328,6 +333,7 @@ public class MicroserviceServiceImpl implements MicroserviceService {
             return binding;
         }).toList();
         serviceEnvironmentMapper.insertIgnoreExisting(bindings);
+        releaseConfigurationMapper.insertDefaultPolicies(projectId, serviceId, uniqueEnvironmentIds, now);
     }
 
     @Override
@@ -343,7 +349,21 @@ public class MicroserviceServiceImpl implements MicroserviceService {
         if (binding == null) {
             throw new ResourceNotFoundException("微服务环境关联不存在");
         }
+        releaseConfigurationMapper.logicallyDeletePolicy(projectId, serviceId, environmentId, LocalDateTime.now());
         serviceEnvironmentMapper.deleteById(binding.getId());
+    }
+
+    /**
+     * 新建服务立即生成可编辑的模拟发布配置，保证其首次进入“构建配置”页面时已有完整结构。
+     * 真实 GitHub/Gitee 凭据仍只由用户后续在受保护位置配置，本方法不生成任何密钥。
+     */
+    private void createDefaultReleaseConfiguration(MicroserviceEntity service, LocalDateTime now) {
+        Long repositoryId = IdWorker.getId();
+        Long buildSpecId = IdWorker.getId();
+        releaseConfigurationMapper.insertDefaultRepository(repositoryId, service.getProjectId(), service.getServiceCode(),
+                service.getRepositoryUrl(), service.getBranchName(), now);
+        releaseConfigurationMapper.insertDefaultBuildSpec(buildSpecId, service.getProjectId(), service.getId(), repositoryId,
+                service.getBuildType(), service.getImageRepository(), now);
     }
 
     private ProjectEntity requireProject(Long projectId) {
