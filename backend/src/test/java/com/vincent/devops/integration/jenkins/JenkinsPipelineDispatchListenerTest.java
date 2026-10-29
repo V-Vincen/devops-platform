@@ -49,7 +49,7 @@ class JenkinsPipelineDispatchListenerTest {
 
         listener.onPipelineRunCreated(new PipelineRunCreatedEvent(1L, 2L, 3L, 4L));
 
-        ArgumentCaptor<Map<String, String>> parameters = ArgumentCaptor.forClass(Map.class);
+        ArgumentCaptor<Map<String, String>> parameters = stringMapCaptor();
         verify(dispatcher).dispatch(parameters.capture());
         assertEquals("4", parameters.getValue().get("PIPELINE_RUN_ID"));
         assertEquals("abc123", parameters.getValue().get("COMMIT_SHA"));
@@ -88,7 +88,7 @@ class JenkinsPipelineDispatchListenerTest {
 
         listener.onPipelineRunCreated(new PipelineRunCreatedEvent(1L, 2L, 3L, 4L));
 
-        ArgumentCaptor<Map<String, String>> parameters = ArgumentCaptor.forClass(Map.class);
+        ArgumentCaptor<Map<String, String>> parameters = stringMapCaptor();
         verify(dispatcher).dispatch(parameters.capture());
         assertFalse(parameters.getValue().containsKey("COMMIT_SHA"));
     }
@@ -106,6 +106,11 @@ class JenkinsPipelineDispatchListenerTest {
 
     private JenkinsPipelineDispatchListener listener() {
         return new JenkinsPipelineDispatchListener(dispatcher, releaseExecutionService, releaseConfigurationService, environmentService);
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static ArgumentCaptor<Map<String, String>> stringMapCaptor() {
+        return (ArgumentCaptor) ArgumentCaptor.forClass(Map.class);
     }
 
     private static PipelineRunResponse pipelineRun() {
