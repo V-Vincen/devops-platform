@@ -48,6 +48,7 @@ pipeline {
         string(name: 'SERVICE_ID', defaultValue: '', description: 'DevOps 平台微服务 ID')
         string(name: 'PIPELINE_RUN_ID', defaultValue: '', description: 'DevOps 平台构建记录 ID')
         string(name: 'REPOSITORY_URL', defaultValue: '', description: 'Git 仓库地址')
+        string(name: 'GIT_CREDENTIALS_ID', defaultValue: '', description: 'Jenkins Git SSH 凭据 ID')
         string(name: 'GIT_REF', defaultValue: 'refs/heads/main', description: 'Git 分支引用')
         string(name: 'COMMIT_SHA', defaultValue: '', description: '期望构建的提交号')
         choice(name: 'BUILD_TYPE', choices: ['MAVEN'], description: '当前支持的构建类型')
@@ -76,20 +77,26 @@ pipeline {
             steps {
                 script {
                     def positiveId = { value -> value?.trim() ==~ /[1-9][0-9]*/ }
-                    def safePath = { value -> value?.trim() == '.' || (value?.trim() ==~ /[A-Za-z0-9][A-Za-z0-9._/-]*/ && !value.contains('..') && !value.startsWith('/')) }
+                    def safePath = { value -> value?.trim() == '.' || (value?.trim() ==~ /[A-Za-z0-9][A-Za-z0-9._\/-]*/ && !value.contains('..') && !value.startsWith('/')) }
                     if (!positiveId(params.PROJECT_ID) || !positiveId(params.SERVICE_ID) || !positiveId(params.PIPELINE_RUN_ID)) {
                         error('PROJECT_ID、SERVICE_ID 和 PIPELINE_RUN_ID 必须是正整数。')
                     }
-                    if (!(params.REPOSITORY_URL?.trim() ==~ /https?:\\/\\/[A-Za-z0-9._~:/-]+(?:\\.git)?/)) {
-                        error('REPOSITORY_URL 格式不正确。')
+                    def repositoryUrl = params.REPOSITORY_URL?.trim()
+                    def httpsRepository = repositoryUrl ==~ /https?:\/\/[A-Za-z0-9._~:\/-]+(?:\.git)?/
+                    def sshRepository = repositoryUrl ==~ /git@[A-Za-z0-9.-]+:[A-Za-z0-9._~\/-]+(?:\.git)?/
+                    if (!httpsRepository && !sshRepository) {
+                        error('REPOSITORY_URL 必须是 HTTPS 或 SSH Git 地址。')
                     }
-                    if (!(params.GIT_REF?.trim() ==~ /refs\\/heads\\/[A-Za-z0-9._/-]+/)) {
+                    if (sshRepository && !params.GIT_CREDENTIALS_ID?.trim()) {
+                        error('SSH 仓库必须提供 GIT_CREDENTIALS_ID。')
+                    }
+                    if (!(params.GIT_REF?.trim() ==~ /refs\/heads\/[A-Za-z0-9._\/-]+/)) {
                         error('GIT_REF 只能是分支引用。')
                     }
                     if (!safePath(params.BUILD_WORKDIR) || !safePath(params.DOCKERFILE_PATH) || !safePath(params.DOCKER_CONTEXT_PATH)) {
                         error('构建目录、Dockerfile 和构建上下文必须是仓库内安全相对路径。')
                     }
-                    if (!(params.IMAGE_REPOSITORY?.trim() ==~ /[A-Za-z0-9][A-Za-z0-9./:-]{0,499}/)) {
+                    if (!(params.IMAGE_REPOSITORY?.trim() ==~ /[A-Za-z0-9][A-Za-z0-9.\/:\-]{0,499}/)) {
                         error('IMAGE_REPOSITORY 格式不正确。')
                     }
                     def requestedTag = params.COMMIT_SHA?.trim()
@@ -111,7 +118,14 @@ pipeline {
         stage('Checkout') {
             steps {
                 script {
-                    git branch: params.GIT_REF.replaceFirst('refs/heads/', ''), url: params.REPOSITORY_URL
+                    checkout([
+                        $class: 'GitSCM',
+                        branches: [[name: params.GIT_REF]],
+                        userRemoteConfigs: [[
+                            url: params.REPOSITORY_URL,
+                            credentialsId: params.GIT_CREDENTIALS_ID?.trim() ?: null
+                        ]]
+                    ])
                     if (params.COMMIT_SHA?.trim()) {
                         sh "git checkout --detach '${params.COMMIT_SHA}'"
                     }
