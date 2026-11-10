@@ -26,7 +26,7 @@ def notifyPlatform(String status, String failureSummary = null) {
             signature="$(openssl dgst -sha256 -hmac "$DEVOPS_CALLBACK_SECRET" .devops-callback.json | awk '{print $NF}')"
             curl --fail --silent --show-error \
               -H 'Content-Type: application/json' \
-              -H "X-DevOps-Signature: sha256:${signature}" \
+              -H "X-DevOps-Signature: sha256=${signature}" \
               --data-binary @.devops-callback.json \
               "$CALLBACK_URL"
         '''
