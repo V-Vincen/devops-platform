@@ -69,13 +69,15 @@ pipeline {
         MAVEN_PUBLIC_URL = 'http://host.docker.internal:18081/repository/maven-public/'
         MAVEN_RELEASES_URL = 'http://host.docker.internal:18081/repository/maven-releases/'
         MAVEN_SNAPSHOTS_URL = 'http://host.docker.internal:18081/repository/maven-snapshots/'
-        MAVEN_SETTINGS_PATH = "${WORKSPACE}/infra/jenkins/settings.xml.example"
+        MAVEN_SETTINGS_PATH = "${WORKSPACE}@tmp/devops-maven-settings.xml"
     }
 
     stages {
         stage('Validate Parameters') {
             steps {
                 script {
+                    // 业务仓库检出会覆盖工作区；先保留平台管理的 Maven 配置，文件仅含环境变量引用。
+                    writeFile file: env.MAVEN_SETTINGS_PATH, text: readFile('infra/jenkins/settings.xml.example')
                     def positiveId = { value -> value?.trim() ==~ /[1-9][0-9]*/ }
                     def safePath = { value -> value?.trim() == '.' || (value?.trim() ==~ /[A-Za-z0-9][A-Za-z0-9._\/-]*/ && !value.contains('..') && !value.startsWith('/')) }
                     if (!positiveId(params.PROJECT_ID) || !positiveId(params.SERVICE_ID) || !positiveId(params.PIPELINE_RUN_ID)) {
@@ -135,8 +137,14 @@ pipeline {
 
         stage('Maven Test') {
             steps {
-                dir(params.BUILD_WORKDIR) {
-                    sh 'mvn -s "$MAVEN_SETTINGS_PATH" -B clean verify'
+                withCredentials([usernamePassword(
+                    credentialsId: 'nexus-maven-publish',
+                    usernameVariable: 'NEXUS_MAVEN_USERNAME',
+                    passwordVariable: 'NEXUS_MAVEN_PASSWORD'
+                )]) {
+                    dir(params.BUILD_WORKDIR) {
+                        sh 'mvn -s "$MAVEN_SETTINGS_PATH" -B clean verify'
+                    }
                 }
             }
         }

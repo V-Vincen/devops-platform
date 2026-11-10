@@ -14,6 +14,11 @@
     <!-- 密码由 Jenkins Credentials 注入，不要把真实值写进文件。 -->
     <servers>
         <server>
+            <id>nexus-public</id>
+            <username>${env.NEXUS_MAVEN_USERNAME}</username>
+            <password>${env.NEXUS_MAVEN_PASSWORD}</password>
+        </server>
+        <server>
             <id>nexus-releases</id>
             <username>${env.NEXUS_MAVEN_USERNAME}</username>
             <password>${env.NEXUS_MAVEN_PASSWORD}</password>
