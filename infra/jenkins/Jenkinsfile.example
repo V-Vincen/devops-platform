@@ -205,21 +205,21 @@ pipeline {
                     }
                 }
                 withCredentials([file(credentialsId: 'k3s-kubeconfig', variable: 'K3S_KUBECONFIG')]) {
-                    withEnv(["KUBECONFIG=${K3S_KUBECONFIG}", 'HELM_DRIVER=configmap',
+                    withEnv(['HELM_DRIVER=configmap',
                              "DEPLOY_IMAGE_REPOSITORY=${params.IMAGE_PULL_REPOSITORY?.trim() ?: params.IMAGE_REPOSITORY}"]) {
                         script { env.DEPLOYMENT_STATUS = 'FAILED' }
                         sh '''#!/bin/sh
                             set -eu
+                            export KUBECONFIG="$K3S_KUBECONFIG"
                             helm upgrade --install "$HELM_RELEASE_NAME" "$HELM_CHART_PATH" \
                               --namespace "$K8S_NAMESPACE" \
                               --set image.repository="$DEPLOY_IMAGE_REPOSITORY" \
                               --set-string image.tag="$RESOLVED_IMAGE_TAG" \
                               --wait --timeout 5m
-                            helm history "$HELM_RELEASE_NAME" --namespace "$K8S_NAMESPACE" --output json > .devops-helm-history.json
+                            helm history "$HELM_RELEASE_NAME" --namespace "$K8S_NAMESPACE" --max 1 | awk 'NR==2 {print $1}' > .devops-helm-revision
                         '''
                         script {
-                            def history = new groovy.json.JsonSlurperClassic().parseText(readFile('.devops-helm-history.json'))
-                            env.DEPLOYMENT_REVISION = history.last().revision.toString()
+                            env.DEPLOYMENT_REVISION = readFile('.devops-helm-revision').trim()
                             env.DEPLOYMENT_STATUS = 'SUCCESS'
                         }
                     }
