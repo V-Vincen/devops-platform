@@ -214,7 +214,7 @@ pipeline {
                             helm upgrade --install "$HELM_RELEASE_NAME" "$HELM_CHART_PATH" \
                               --namespace "$K8S_NAMESPACE" \
                               --set image.repository="$DEPLOY_IMAGE_REPOSITORY" \
-                              --set-string image.tag="$RESOLVED_IMAGE_TAG" \
+                              --set-string image.tag="${RESOLVED_IMAGE_TAG}@${RESOLVED_IMAGE_DIGEST}" \
                               --wait --timeout 5m
                             helm history "$HELM_RELEASE_NAME" --namespace "$K8S_NAMESPACE" --max 1 | awk 'NR==2 {print $1}' > .devops-helm-revision
                         '''
