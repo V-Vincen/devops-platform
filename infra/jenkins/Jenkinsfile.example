@@ -16,7 +16,10 @@ def notifyPlatform(String status, String failureSummary = null) {
         failureSummary : failureSummary,
         imageRepository: status == 'SUCCESS' ? params.IMAGE_REPOSITORY : null,
         imageTag       : status == 'SUCCESS' ? env.RESOLVED_IMAGE_TAG : null,
-        imageDigest    : status == 'SUCCESS' ? env.RESOLVED_IMAGE_DIGEST : null
+        imageDigest    : status == 'SUCCESS' ? env.RESOLVED_IMAGE_DIGEST : null,
+        deploymentStatus: env.DEPLOYMENT_STATUS ?: null,
+        helmReleaseName: env.DEPLOYMENT_STATUS ? params.HELM_RELEASE_NAME : null,
+        helmRevision: env.DEPLOYMENT_REVISION ? env.DEPLOYMENT_REVISION.toInteger() : null
     ])
     writeFile file: '.devops-callback.json', text: payload
     withCredentials([string(credentialsId: 'devops-jenkins-callback-secret', variable: 'DEVOPS_CALLBACK_SECRET')]) {
@@ -62,6 +65,7 @@ pipeline {
         string(name: 'HELM_CHART_PATH', defaultValue: '', description: '仓库内 Helm Chart 路径')
         string(name: 'HELM_RELEASE_NAME', defaultValue: '', description: 'Helm Release 名称')
         string(name: 'K8S_NAMESPACE', defaultValue: '', description: '目标 Kubernetes Namespace')
+        string(name: 'IMAGE_PULL_REPOSITORY', defaultValue: '', description: '部署拉取地址；为空时使用推送地址')
     }
 
     environment {
@@ -201,16 +205,23 @@ pipeline {
                     }
                 }
                 withCredentials([file(credentialsId: 'k3s-kubeconfig', variable: 'K3S_KUBECONFIG')]) {
-                    withEnv(["KUBECONFIG=${K3S_KUBECONFIG}", 'HELM_DRIVER=configmap']) {
+                    withEnv(["KUBECONFIG=${K3S_KUBECONFIG}", 'HELM_DRIVER=configmap',
+                             "DEPLOY_IMAGE_REPOSITORY=${params.IMAGE_PULL_REPOSITORY?.trim() ?: params.IMAGE_REPOSITORY}"]) {
+                        script { env.DEPLOYMENT_STATUS = 'FAILED' }
                         sh '''#!/bin/sh
                             set -eu
                             helm upgrade --install "$HELM_RELEASE_NAME" "$HELM_CHART_PATH" \
                               --namespace "$K8S_NAMESPACE" \
-                              --create-namespace \
-                              --set image.repository="$IMAGE_REPOSITORY" \
+                              --set image.repository="$DEPLOY_IMAGE_REPOSITORY" \
                               --set-string image.tag="$RESOLVED_IMAGE_TAG" \
                               --wait --timeout 5m
+                            helm history "$HELM_RELEASE_NAME" --namespace "$K8S_NAMESPACE" --output json > .devops-helm-history.json
                         '''
+                        script {
+                            def history = new groovy.json.JsonSlurperClassic().parseText(readFile('.devops-helm-history.json'))
+                            env.DEPLOYMENT_REVISION = history.last().revision.toString()
+                            env.DEPLOYMENT_STATUS = 'SUCCESS'
+                        }
                     }
                 }
             }
@@ -222,7 +233,8 @@ pipeline {
             script { notifyPlatform('SUCCESS') }
         }
         failure {
-            script { notifyPlatform('FAILED', "Jenkins 构建 #${env.BUILD_NUMBER} 失败") }
+            // 镜像发布成功后的部署失败单独记录，保留可用于重试或回滚的镜像。
+            script { notifyPlatform(env.DEPLOYMENT_STATUS ? 'SUCCESS' : 'FAILED', "Jenkins 构建或部署 #${env.BUILD_NUMBER} 失败") }
         }
         always {
             archiveArtifacts artifacts: '**/target/*.jar', allowEmptyArchive: true
